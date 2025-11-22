@@ -66,10 +66,31 @@ class _PiEdeUIState extends State<PiEdeUI> {
     });
   }
 
-  void _onPowerOff() {
-    setState(() {
-      _selectedWidget = 0;
-    });
+  void _onPowerOff(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Confirm Shutdown'),
+          content: const Text('Are you sure you want to shut down the device?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(); // Dismiss dialog
+              },
+            ),
+            TextButton(
+              child: const Text('Shutdown'),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(); // Dismiss dialog
+                //_shutDownDevice(); // Proceed to shut down
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -105,11 +126,12 @@ class _PiEdeUIState extends State<PiEdeUI> {
                   _onWiFi();
                   Navigator.pop(context);
                 }),
+            Divider(),
             IconButton(
                 icon: const Icon(Icons.power_off),
                 onPressed: () {
-                  _onPowerOff();
                   Navigator.pop(context);
+                  _onPowerOff(context);
                 })
           ],
         ),
