@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedalboards.dart';
@@ -84,7 +85,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
               child: const Text('Shutdown'),
               onPressed: () {
                 Navigator.of(dialogContext).pop(); // Dismiss dialog
-                //_shutDownDevice(); // Proceed to shut down
+                _shutDownDevice(); // Proceed to shut down
               },
             ),
           ],
@@ -93,11 +94,22 @@ class _PiEdeUIState extends State<PiEdeUI> {
     );
   }
 
+  Future<void> _shutDownDevice() async {
+    try {
+      log.info("shutdown");
+      //await platform.invokeMethod('shutdown');
+      SystemNavigator.pop();
+    } on PlatformException catch (e) {
+      log.severe("Failed to invoke shutdown method: '${e.message}'.");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: accentColor,
+        toolbarHeight: 30,
         title: Text(widget.title),
         leading: Builder(
           builder: (context) {
@@ -112,14 +124,11 @@ class _PiEdeUIState extends State<PiEdeUI> {
       ),
       body: bodyWidgets[_selectedWidget],
       drawer: Drawer(
+        width: 64,
         child: ListView(
           // Remove any padding from the ListView.
           padding: EdgeInsets.zero,
           children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(color: accentColor),
-              child: Text(appName),
-            ),
             IconButton(
                 icon: const Icon(Icons.wifi),
                 onPressed: () {

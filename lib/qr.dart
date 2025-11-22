@@ -39,11 +39,10 @@ class _LocalAddressQRWidgetState extends State<LocalAddressQRWidget> {
         QrImageView(
           data: _qrData,
           version: QrVersions.auto,
-          size: 200.0,
+          size: 120.0,
         ),
-        const SizedBox(height: 20),
-        Text('Local IP: $_localIpAddress'),
-        Text('QR Code Data: $_qrData', textAlign: TextAlign.center)
+        const SizedBox(height: 8),
+        Text('URL: $_qrData', textAlign: TextAlign.center)
       ],
     );
   }
