@@ -44,21 +44,22 @@ class PiEdeUI extends StatefulWidget {
 }
 
 class _PiEdeUIState extends State<PiEdeUI> {
-  late final Future myFuture;
   final HMIServer hmiServer = HMIServer.init();
-  final pedalboards = Pedalboards();
   int _selectedWidget = 0;
 
-  final Widget nameWidget = const Center(child: Text("Ready"));
-
+  final Widget pedalBoardsWidget = PedalboardsWidget();
   final Widget qrWidget = Center(child: LocalAddressQRWidget());
-
-  late final List<Widget> bodyWidgets = [nameWidget, qrWidget];
+  late final List<Widget> bodyWidgets = [pedalBoardsWidget, qrWidget];
 
   @override
   void initState() {
-    myFuture = pedalboards.load();
     super.initState();
+  }
+
+  void _onPedalboard() {
+    setState(() {
+      _selectedWidget = 0;
+    });
   }
 
   void _onWiFi() {
@@ -72,8 +73,8 @@ class _PiEdeUIState extends State<PiEdeUI> {
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          title: const Text('Confirm Shutdown'),
-          content: const Text('Are you sure you want to shut down the device?'),
+          title: const Text('Shutdown'),
+          content: const Text('Shut down the device?'),
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
@@ -109,7 +110,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: accentColor,
-        toolbarHeight: 30,
+        toolbarHeight: 34,
         title: Text(widget.title),
         leading: Builder(
           builder: (context) {
@@ -129,6 +130,13 @@ class _PiEdeUIState extends State<PiEdeUI> {
           // Remove any padding from the ListView.
           padding: EdgeInsets.zero,
           children: [
+            IconButton(
+              icon: const Icon(Icons.music_note),
+              onPressed: () {
+                _onPedalboard();
+                Navigator.pop(context);
+              },
+            ),
             IconButton(
                 icon: const Icon(Icons.wifi),
                 onPressed: () {

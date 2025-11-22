@@ -16,15 +16,13 @@ class _LocalAddressQRWidgetState extends State<LocalAddressQRWidget> {
   @override
   void initState() {
     super.initState();
-    _getNetworkInfo();
+    load();
   }
 
-  Future<void> _getNetworkInfo() async {
+  Future<void> load() async {
     final info = NetworkInfo();
     String? wifiIP = await info.getWifiIP();
-
     String dynamicUrl = 'http://$wifiIP:8888';
-
     setState(() {
       _localIpAddress = wifiIP ?? 'IP Not Available';
       _qrData = dynamicUrl;
