@@ -45,11 +45,10 @@ class PiEdeUI extends StatefulWidget {
 
 class _PiEdeUIState extends State<PiEdeUI> {
   final HMIServer hmiServer = HMIServer.init();
-  int _selectedWidget = 0;
-
   final Widget pedalBoardsWidget = PedalboardsWidget();
   final Widget qrWidget = Center(child: LocalAddressQRWidget());
   late final List<Widget> bodyWidgets = [pedalBoardsWidget, qrWidget];
+  int _selectedWidget = 0;
 
   @override
   void initState() {
@@ -98,8 +97,8 @@ class _PiEdeUIState extends State<PiEdeUI> {
   Future<void> _shutDownDevice() async {
     try {
       log.info("shutdown");
-      //await platform.invokeMethod('shutdown');
       SystemNavigator.pop();
+      //await platform.invokeMethod('shutdown');
     } on PlatformException catch (e) {
       log.severe("Failed to invoke shutdown method: '${e.message}'.");
     }
@@ -111,7 +110,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
       appBar: AppBar(
         backgroundColor: accentColor,
         toolbarHeight: 34,
-        title: Text(widget.title),
+        title: Text(appName),
         leading: Builder(
           builder: (context) {
             return IconButton(

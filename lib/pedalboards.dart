@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:pi_ede_ui/pedalboard.dart';
@@ -33,7 +32,14 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     for (var pDir in pDirs) {
       pedalboards.add(Pedalboard.load(pDir));
     }
+    setState(() {
+      activePedalboard = 0;
+    });
     return pedalboards;
+  }
+
+  String selectedName() {
+    return activePedalboard < 0 ? 'Pedalboard' : pedalboards[activePedalboard].name;
   }
 
   void _left() {
@@ -67,10 +73,12 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
                         }
                       : null),
               Expanded(
-                  child: Image.asset(
-                'assets/pedalboard.png',
-                fit: BoxFit.cover,
-              )),
+                  child: (activePedalboard < 0 || !File("${pedalboards[activePedalboard].path}/thumbnail.png").existsSync())
+                      ? Image.asset(
+                          'assets/pedalboard.png',
+                          fit: BoxFit.cover,
+                        )
+                      : Image(image: FileImage(File("${pedalboards[activePedalboard].path}/thumbnail.png")))),
               IconButton(
                   icon: const Icon(Icons.chevron_right),
                   onPressed: activePedalboard >= 0
@@ -79,8 +87,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
                         }
                       : null),
             ],
-          ),
-          Text('Pedalboard')
+          )
         ]));
   }
 }
