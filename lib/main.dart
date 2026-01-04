@@ -1,20 +1,31 @@
+import 'dart:ffi' as ffi;
+
+import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
+import 'package:pi_ede_ui/gpio_client.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedalboards.dart';
 import 'package:pi_ede_ui/qr.dart';
+
+
+// C header typedef:
+typedef SystemC = ffi.Int32 Function(ffi.Pointer<Utf8> command);
+
+// Dart header typedef
+typedef SystemDart = int Function(ffi.Pointer<Utf8> command);
 
 const appName = 'Pi-EDE';
 const accentColor = Colors.orange;
 final log = Logger(appName);
 
 void main() {
-  Logger.root.level = Level.ALL; // defaults to Level.INFO
+  Logger.root.level = Level.INFO; // defaults to Level.INFO
   Logger.root.onRecord.listen((record) {
-    print('${record.level.name}: ${record.time}: ${record.message}');
+    if (record.loggerName != "term") {
+      print('${record.time} ${record.level.name} [${record.loggerName}] ${record.message}');
+    }
   });
-
   runApp(const UI());
 }
 
@@ -45,10 +56,12 @@ class PiEdeUI extends StatefulWidget {
 
 class _PiEdeUIState extends State<PiEdeUI> {
   final HMIServer hmiServer = HMIServer.init();
+  final GPIOClient gpioClient = GPIOClient.init();
   final Widget pedalBoardsWidget = PedalboardsWidget();
   final Widget qrWidget = Center(child: LocalAddressQRWidget());
   late final List<Widget> bodyWidgets = [pedalBoardsWidget, qrWidget];
   int _selectedWidget = 0;
+  String _title = appName;
 
   @override
   void initState() {
@@ -58,12 +71,14 @@ class _PiEdeUIState extends State<PiEdeUI> {
   void _onPedalboard() {
     setState(() {
       _selectedWidget = 0;
+      _title = bodyWidgets[0].toStringShort();
     });
   }
 
   void _onWiFi() {
     setState(() {
       _selectedWidget = 1;
+      _title = 'Wi-Fi';
     });
   }
 
@@ -95,13 +110,12 @@ class _PiEdeUIState extends State<PiEdeUI> {
   }
 
   Future<void> _shutDownDevice() async {
-    try {
-      log.info("shutdown");
-      SystemNavigator.pop();
-      //await platform.invokeMethod('shutdown');
-    } on PlatformException catch (e) {
-      log.severe("Failed to invoke shutdown method: '${e.message}'.");
-    }
+    log.info("shutdown");
+    var libc = ffi.DynamicLibrary.open('libc.so.6');
+    final systemP = libc.lookupFunction<SystemC, SystemDart>('system');
+    final cmdP = 'sudo shutdown now'.toNativeUtf8();
+    systemP(cmdP);
+    calloc.free(cmdP);
   }
 
   @override
@@ -110,7 +124,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
       appBar: AppBar(
         backgroundColor: accentColor,
         toolbarHeight: 34,
-        title: Text(appName),
+        title: Text(_title),
         leading: Builder(
           builder: (context) {
             return IconButton(

@@ -10,8 +10,7 @@ class HMIServer {
   HMIServer.init({int port = 9898}) {
     ServerSocket.bind(InternetAddress.anyIPv4, port).then((value) {
       serverSocket = value;
-      log.info(
-          "Server is running at <${serverSocket.address.toString()}:${serverSocket.port}>\n");
+      log.info("Server is running at <${serverSocket.address.toString()}:${serverSocket.port}>");
       serverSocket.listen(
         (client) {
           handleNewClient(client);
@@ -25,8 +24,7 @@ class HMIServer {
   }
 
   void handleNewClient(Socket client) {
-    log.info(
-        "<${client.remoteAddress.toString()}:${client.remotePort}> connected.");
+    log.info("<${client.remoteAddress.toString()}:${client.remotePort}> connected.");
 
     client.listen(
       (message) {
@@ -35,8 +33,7 @@ class HMIServer {
       },
       onDone: () {
         client.close();
-        log.info(
-            "<${client.remoteAddress.toString()}:${client.remotePort}> disconnected.");
+        log.info("<${client.remoteAddress.toString()}:${client.remotePort}> disconnected.");
       },
     );
   }

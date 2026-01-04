@@ -44,4 +44,10 @@ class _LocalAddressQRWidgetState extends State<LocalAddressQRWidget> {
       ],
     );
   }
+
+  @override
+  String toStringShort() {
+    return 'Wi-Fi address';
+  }
+
 }

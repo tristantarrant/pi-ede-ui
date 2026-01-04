@@ -38,7 +38,8 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     return pedalboards;
   }
 
-  String selectedName() {
+  @override
+  String toStringShort() {
     return activePedalboard < 0 ? 'Pedalboard' : pedalboards[activePedalboard].name;
   }
 
@@ -73,12 +74,42 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
                         }
                       : null),
               Expanded(
-                  child: (activePedalboard < 0 || !File("${pedalboards[activePedalboard].path}/thumbnail.png").existsSync())
+                  child: (activePedalboard < 0 ||
+                          !File("${pedalboards[activePedalboard].path}/thumbnail.png").existsSync())
                       ? Image.asset(
                           'assets/pedalboard.png',
                           fit: BoxFit.cover,
                         )
-                      : Image(image: FileImage(File("${pedalboards[activePedalboard].path}/thumbnail.png")))),
+                      : Stack(children: [
+                          Image.asset(
+                            'assets/pedalboard.png',
+                          ),
+                          Image(image: FileImage(File('${pedalboards[activePedalboard].path}/thumbnail.png'))),
+                          Center(
+                              child: Text(
+                                pedalboards[activePedalboard].name,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 50,
+                                  fontWeight: FontWeight.bold,
+                                  shadows: [
+                                    // A dark shadow for depth
+                                    Shadow(
+                                      color: Colors.black,
+                                      offset: Offset(5.0, 5.0),
+                                      blurRadius: 10.0,
+                                    ),
+                                    // A secondary bright shadow for a neon-like effect
+                                    Shadow(
+                                      color: Colors.blue.shade200,
+                                      offset: Offset(-5.0, -5.0),
+                                      blurRadius: 8.0,
+                                    ),
+                                  ],
+                                ),
+                              ))
+                        ])),
               IconButton(
                   icon: const Icon(Icons.chevron_right),
                   onPressed: activePedalboard >= 0
