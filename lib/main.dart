@@ -57,7 +57,7 @@ class PiEdeUI extends StatefulWidget {
 class _PiEdeUIState extends State<PiEdeUI> {
   final HMIServer hmiServer = HMIServer.init();
   final GPIOClient gpioClient = GPIOClient.init();
-  final Widget pedalBoardsWidget = PedalboardsWidget();
+  late final Widget pedalBoardsWidget = PedalboardsWidget(hmiServer: hmiServer);
   final Widget qrWidget = Center(child: LocalAddressQRWidget());
   late final List<Widget> bodyWidgets = [pedalBoardsWidget, qrWidget];
   int _selectedWidget = 0;
