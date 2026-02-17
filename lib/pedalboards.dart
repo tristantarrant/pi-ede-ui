@@ -32,6 +32,24 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   StreamSubscription<FileParamEvent>? _fileParamSubscription;
   PageController? _pageController;
 
+  // Store file param values received from HMI (instance -> paramUri -> path)
+  final Map<String, Map<String, String>> _fileParamValues = {};
+
+  /// Normalize instance name by removing brackets and /graph/ prefix
+  String _normalizeInstanceName(String name) {
+    var result = name;
+    if (result.startsWith('<')) {
+      result = result.substring(1);
+    }
+    if (result.endsWith('>')) {
+      result = result.substring(0, result.length - 1);
+    }
+    if (result.startsWith('/graph/')) {
+      result = result.substring(7); // Remove '/graph/'
+    }
+    return result;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -88,36 +106,61 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     });
 
     _fileParamSubscription = hmi.onFileParam.listen((event) {
-      log.info("HMI file param event: instance=${event.instance}, uri=${event.paramUri}, path=${event.path}");
-      // Update the file parameter value for the matching pedal
-      if (_pedals != null) {
-        for (final pedal in _pedals!) {
-          // Check if this event is for this pedal (match instance name)
-          var instanceName = pedal.instanceName;
-          if (instanceName.startsWith('<')) {
-            instanceName = instanceName.substring(1);
-          }
-          if (instanceName.endsWith('>')) {
-            instanceName = instanceName.substring(0, instanceName.length - 1);
-          }
-          if (instanceName == event.instance) {
-            // Update the file parameter
-            if (pedal.fileParameters != null) {
-              for (final param in pedal.fileParameters!) {
-                if (param.uri == event.paramUri) {
-                  setState(() {
-                    param.currentPath = event.path;
-                  });
-                  log.info("Updated file param ${param.label} to ${event.path}");
-                  break;
-                }
-              }
+      // Normalize the instance name from HMI (e.g., /graph/ratatouille -> ratatouille)
+      final normalizedInstance = _normalizeInstanceName(event.instance);
+      log.info("HMI file param event: instance=${event.instance} -> $normalizedInstance, uri=${event.paramUri}, path=${event.path}");
+
+      // Store the value for later (when pedals are loaded)
+      _fileParamValues.putIfAbsent(normalizedInstance, () => {});
+      _fileParamValues[normalizedInstance]![event.paramUri] = event.path;
+
+      // Also update pedals if they're already loaded
+      _applyFileParamToPedals(normalizedInstance, event.paramUri, event.path);
+    });
+  }
+
+  void _applyFileParamToPedals(String normalizedInstance, String paramUri, String path) {
+    if (_pedals == null) return;
+
+    for (final pedal in _pedals!) {
+      // Check if this event is for this pedal (match instance name)
+      final instanceName = _normalizeInstanceName(pedal.instanceName);
+      if (instanceName == normalizedInstance) {
+        // Update the file parameter
+        if (pedal.fileParameters != null) {
+          for (final param in pedal.fileParameters!) {
+            if (param.uri == paramUri) {
+              setState(() {
+                param.currentPath = path;
+              });
+              log.info("Updated file param ${param.label} to $path");
+              break;
             }
-            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  void _applyStoredFileParams() {
+    if (_pedals == null) return;
+
+    for (final pedal in _pedals!) {
+      final instanceName = _normalizeInstanceName(pedal.instanceName);
+      final storedParams = _fileParamValues[instanceName];
+      if (storedParams != null && pedal.fileParameters != null) {
+        for (final param in pedal.fileParameters!) {
+          final storedPath = storedParams[param.uri];
+          if (storedPath != null) {
+            param.currentPath = storedPath;
+            log.fine("Applied file param ${param.label} = $storedPath");
           }
         }
       }
-    });
+    }
+    // Trigger a rebuild to show the applied values
+    setState(() {});
   }
 
   @override
@@ -167,8 +210,10 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       // Load pedals for the current pedalboard
       if (activePedalboard >= 0 && activePedalboard < pedalboards.length) {
         final pedals = await pedalboards[activePedalboard].getPedals();
+        // Apply stored file param values before setting state
+        _pedals = pedals;
+        _applyStoredFileParams();
         setState(() {
-          _pedals = pedals;
           _loadingPedals = false;
         });
       } else {
