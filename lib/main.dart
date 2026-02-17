@@ -5,10 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:pi_ede_ui/bank.dart';
 import 'package:pi_ede_ui/banks.dart';
+import 'package:pi_ede_ui/bypass.dart';
 import 'package:pi_ede_ui/gpio_client.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
+import 'package:pi_ede_ui/midi_settings.dart';
 import 'package:pi_ede_ui/pedalboards.dart';
+import 'package:pi_ede_ui/profiles.dart';
 import 'package:pi_ede_ui/qr.dart';
+import 'package:pi_ede_ui/snapshots.dart';
+import 'package:pi_ede_ui/transport.dart';
 import 'package:pi_ede_ui/tuner.dart';
 
 
@@ -112,6 +117,41 @@ class _PiEdeUIState extends State<PiEdeUI> {
     });
   }
 
+  void _onSnapshots() {
+    setState(() {
+      _selectedWidget = 4;
+      _title = 'Snapshots';
+    });
+  }
+
+  void _onTransport() {
+    setState(() {
+      _selectedWidget = 5;
+      _title = 'Transport';
+    });
+  }
+
+  void _onBypass() {
+    setState(() {
+      _selectedWidget = 6;
+      _title = 'Bypass';
+    });
+  }
+
+  void _onMIDI() {
+    setState(() {
+      _selectedWidget = 7;
+      _title = 'MIDI';
+    });
+  }
+
+  void _onProfiles() {
+    setState(() {
+      _selectedWidget = 8;
+      _title = 'Profiles';
+    });
+  }
+
   void _onPowerOff(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -161,6 +201,16 @@ class _PiEdeUIState extends State<PiEdeUI> {
         return qrWidget;
       case 3:
         return TunerWidget(hmiServer: hmiServer);
+      case 4:
+        return SnapshotsWidget(hmiServer: hmiServer);
+      case 5:
+        return TransportWidget(hmiServer: hmiServer);
+      case 6:
+        return BypassWidget(hmiServer: hmiServer);
+      case 7:
+        return MIDISettingsWidget(hmiServer: hmiServer);
+      case 8:
+        return ProfilesWidget(hmiServer: hmiServer);
       default:
         return const Center(child: Text('Unknown view'));
     }
@@ -208,6 +258,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
                 _onPedalboard();
                 Navigator.pop(context);
               },
+              tooltip: 'Pedalboards',
             ),
             IconButton(
               icon: const Icon(Icons.folder),
@@ -215,27 +266,75 @@ class _PiEdeUIState extends State<PiEdeUI> {
                 _onBanks();
                 Navigator.pop(context);
               },
+              tooltip: 'Banks',
             ),
+            IconButton(
+              icon: const Icon(Icons.camera),
+              onPressed: () {
+                _onSnapshots();
+                Navigator.pop(context);
+              },
+              tooltip: 'Snapshots',
+            ),
+            const Divider(),
             IconButton(
               icon: const Icon(Icons.tune),
               onPressed: () {
                 _onTuner();
                 Navigator.pop(context);
               },
+              tooltip: 'Tuner',
             ),
             IconButton(
-                icon: const Icon(Icons.wifi),
-                onPressed: () {
-                  _onWiFi();
-                  Navigator.pop(context);
-                }),
-            Divider(),
+              icon: const Icon(Icons.speed),
+              onPressed: () {
+                _onTransport();
+                Navigator.pop(context);
+              },
+              tooltip: 'Transport',
+            ),
             IconButton(
-                icon: const Icon(Icons.power_off),
-                onPressed: () {
-                  Navigator.pop(context);
-                  _onPowerOff(context);
-                })
+              icon: const Icon(Icons.volume_off),
+              onPressed: () {
+                _onBypass();
+                Navigator.pop(context);
+              },
+              tooltip: 'Bypass',
+            ),
+            const Divider(),
+            IconButton(
+              icon: const Icon(Icons.piano),
+              onPressed: () {
+                _onMIDI();
+                Navigator.pop(context);
+              },
+              tooltip: 'MIDI Settings',
+            ),
+            IconButton(
+              icon: const Icon(Icons.person),
+              onPressed: () {
+                _onProfiles();
+                Navigator.pop(context);
+              },
+              tooltip: 'Profiles',
+            ),
+            IconButton(
+              icon: const Icon(Icons.wifi),
+              onPressed: () {
+                _onWiFi();
+                Navigator.pop(context);
+              },
+              tooltip: 'Wi-Fi',
+            ),
+            const Divider(),
+            IconButton(
+              icon: const Icon(Icons.power_off),
+              onPressed: () {
+                Navigator.pop(context);
+                _onPowerOff(context);
+              },
+              tooltip: 'Shutdown',
+            ),
           ],
         ),
       ),

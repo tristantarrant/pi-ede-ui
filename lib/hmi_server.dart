@@ -31,6 +31,38 @@ class TunerEvent {
   bool get isValid => note != '?';
 }
 
+/// Snapshot data
+class Snapshot {
+  final int index;
+  final String name;
+
+  Snapshot(this.index, this.name);
+}
+
+/// Event emitted when snapshots list is received
+class SnapshotsEvent {
+  final int currentIndex;
+  final List<Snapshot> snapshots;
+
+  SnapshotsEvent(this.currentIndex, this.snapshots);
+}
+
+/// Event emitted when a menu item value changes
+class MenuItemEvent {
+  final int menuId;
+  final dynamic value;
+
+  MenuItemEvent(this.menuId, this.value);
+}
+
+/// Event emitted when profiles list is received
+class ProfilesEvent {
+  final int currentIndex;
+  final List<String> profiles;
+
+  ProfilesEvent(this.currentIndex, this.profiles);
+}
+
 class HMIServer {
   late ServerSocket serverSocket;
   final List<Socket> _clients = [];
@@ -43,6 +75,9 @@ class HMIServer {
   final _pedalboardChangeController = StreamController<PedalboardChangeEvent>.broadcast();
   final _pedalboardLoadController = StreamController<PedalboardLoadEvent>.broadcast();
   final _tunerController = StreamController<TunerEvent>.broadcast();
+  final _snapshotsController = StreamController<SnapshotsEvent>.broadcast();
+  final _menuItemController = StreamController<MenuItemEvent>.broadcast();
+  final _profilesController = StreamController<ProfilesEvent>.broadcast();
 
   /// Stream of pedalboard change events
   Stream<PedalboardChangeEvent> get onPedalboardChange => _pedalboardChangeController.stream;
@@ -52,6 +87,15 @@ class HMIServer {
 
   /// Stream of tuner events
   Stream<TunerEvent> get onTuner => _tunerController.stream;
+
+  /// Stream of snapshots events
+  Stream<SnapshotsEvent> get onSnapshots => _snapshotsController.stream;
+
+  /// Stream of menu item events
+  Stream<MenuItemEvent> get onMenuItem => _menuItemController.stream;
+
+  /// Stream of profiles events
+  Stream<ProfilesEvent> get onProfiles => _profilesController.stream;
 
   HMIServer.init({int port = 9898}) {
     ServerSocket.bind(InternetAddress.anyIPv4, port).then((value) {
@@ -153,6 +197,18 @@ class HMIServer {
         _handleTuner(client, args);
         break;
 
+      case HMIProtocol.CMD_SNAPSHOTS:
+        _handleSnapshots(client, args);
+        break;
+
+      case HMIProtocol.CMD_MENU_ITEM_CHANGE:
+        _handleMenuItemChange(client, args);
+        break;
+
+      case HMIProtocol.CMD_PROFILE_LOAD:
+        _handleProfileLoad(client, args);
+        break;
+
       default:
         log.warning("Unknown command: $command");
         _sendResponse(client, -1);
@@ -227,6 +283,69 @@ class HMIServer {
     _sendResponse(client, 0);
   }
 
+  void _handleSnapshots(Socket client, List<String> args) {
+    // Format: ssg current_index name1 name2 name3 ...
+    if (args.isEmpty) {
+      log.warning("Snapshots: missing arguments");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    final currentIndex = int.tryParse(args[0]) ?? 0;
+    final snapshots = <Snapshot>[];
+    for (int i = 1; i < args.length; i++) {
+      snapshots.add(Snapshot(i - 1, Uri.decodeComponent(args[i])));
+    }
+
+    log.info("Snapshots: current=$currentIndex, count=${snapshots.length}");
+    _snapshotsController.add(SnapshotsEvent(currentIndex, snapshots));
+    _sendResponse(client, 0);
+  }
+
+  void _handleMenuItemChange(Socket client, List<String> args) {
+    // Format: c menu_id value
+    if (args.length < 2) {
+      log.warning("Menu item change: missing arguments");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    final menuId = int.tryParse(args[0]);
+    if (menuId == null) {
+      log.warning("Menu item change: invalid menu_id '${args[0]}'");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    // Value can be int or float depending on menu item
+    dynamic value;
+    if (args[1].contains('.')) {
+      value = double.tryParse(args[1]) ?? 0.0;
+    } else {
+      value = int.tryParse(args[1]) ?? 0;
+    }
+
+    log.info("Menu item change: id=$menuId, value=$value");
+    _menuItemController.add(MenuItemEvent(menuId, value));
+    _sendResponse(client, 0);
+  }
+
+  void _handleProfileLoad(Socket client, List<String> args) {
+    // Format: upr current_index profile1 profile2 ...
+    if (args.isEmpty) {
+      log.warning("Profile load: missing arguments");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    final currentIndex = int.tryParse(args[0]) ?? 0;
+    final profiles = args.sublist(1).map((p) => Uri.decodeComponent(p)).toList();
+
+    log.info("Profiles: current=$currentIndex, count=${profiles.length}");
+    _profilesController.add(ProfilesEvent(currentIndex, profiles));
+    _sendResponse(client, 0);
+  }
+
   void _sendResponse(Socket client, int status, [String? data]) {
     final response = data != null
         ? "${HMIProtocol.CMD_RESPONSE} $status $data\x00"
@@ -298,10 +417,119 @@ class HMIServer {
     broadcast('${HMIProtocol.CMD_TUNER_REF_FREQ} $freq');
   }
 
+  // ============ Snapshot Commands ============
+
+  /// Request snapshots list
+  void getSnapshots() {
+    log.info("Requesting snapshots list");
+    broadcast(HMIProtocol.CMD_SNAPSHOTS);
+  }
+
+  /// Load a snapshot by index
+  void loadSnapshot(int index) {
+    log.info("Loading snapshot $index");
+    broadcast('${HMIProtocol.CMD_SNAPSHOTS_LOAD} $index');
+  }
+
+  /// Save current state to snapshot
+  void saveSnapshot(int index) {
+    log.info("Saving snapshot $index");
+    broadcast('${HMIProtocol.CMD_SNAPSHOTS_SAVE} $index');
+  }
+
+  /// Save snapshot with new name
+  void saveSnapshotAs(String name) {
+    log.info("Saving snapshot as '$name'");
+    broadcast('${HMIProtocol.CMD_SNAPSHOT_SAVE_AS} ${Uri.encodeComponent(name)}');
+  }
+
+  /// Delete a snapshot
+  void deleteSnapshot(int index) {
+    log.info("Deleting snapshot $index");
+    broadcast('${HMIProtocol.CMD_SNAPSHOT_DELETE} $index');
+  }
+
+  /// Rename a snapshot
+  void renameSnapshot(int index, String name) {
+    log.info("Renaming snapshot $index to '$name'");
+    broadcast('${HMIProtocol.CMD_SNAPSHOT_NAME_SET} $index ${Uri.encodeComponent(name)}');
+  }
+
+  // ============ Menu Item Commands ============
+
+  /// Set a menu item value (tempo, bypass, MIDI settings, etc.)
+  void setMenuItem(int menuId, dynamic value) {
+    log.info("Setting menu item $menuId to $value");
+    broadcast('${HMIProtocol.CMD_MENU_ITEM_CHANGE} $menuId $value');
+  }
+
+  /// Set tempo BPM
+  void setTempo(double bpm) {
+    setMenuItem(HMIProtocol.MENU_ID_TEMPO, bpm);
+  }
+
+  /// Set beats per bar
+  void setBeatsPerBar(int beats) {
+    setMenuItem(HMIProtocol.MENU_ID_BEATS_PER_BAR, beats);
+  }
+
+  /// Set play status (0=stopped, 1=playing)
+  void setPlayStatus(bool playing) {
+    setMenuItem(HMIProtocol.MENU_ID_PLAY_STATUS, playing ? 1 : 0);
+  }
+
+  /// Set quick bypass (0=off, 1=on)
+  void setQuickBypass(bool bypassed) {
+    setMenuItem(HMIProtocol.MENU_ID_QUICK_BYPASS, bypassed ? 1 : 0);
+  }
+
+  /// Set bypass for channel 1 (0=off, 1=on)
+  void setBypass1(bool bypassed) {
+    setMenuItem(HMIProtocol.MENU_ID_BYPASS1, bypassed ? 1 : 0);
+  }
+
+  /// Set bypass for channel 2 (0=off, 1=on)
+  void setBypass2(bool bypassed) {
+    setMenuItem(HMIProtocol.MENU_ID_BYPASS2, bypassed ? 1 : 0);
+  }
+
+  /// Set MIDI clock source (0=internal, 1=MIDI, 2=Ableton Link)
+  void setMidiClockSource(int source) {
+    setMenuItem(HMIProtocol.MENU_ID_MIDI_CLK_SOURCE, source);
+  }
+
+  /// Set MIDI clock send (0=off, 1=on)
+  void setMidiClockSend(bool send) {
+    setMenuItem(HMIProtocol.MENU_ID_MIDI_CLK_SEND, send ? 1 : 0);
+  }
+
+  // ============ Profile Commands ============
+
+  /// Request profiles list
+  void getProfiles() {
+    log.info("Requesting profiles list");
+    broadcast(HMIProtocol.CMD_PROFILE_LOAD);
+  }
+
+  /// Store current settings to a profile
+  void storeProfile(int index) {
+    log.info("Storing profile $index");
+    broadcast('${HMIProtocol.CMD_PROFILE_STORE} $index');
+  }
+
+  /// Load a profile
+  void loadProfile(int index) {
+    log.info("Loading profile $index");
+    broadcast('${HMIProtocol.CMD_PROFILE_LOAD} $index');
+  }
+
   void dispose() {
     _pedalboardChangeController.close();
     _pedalboardLoadController.close();
     _tunerController.close();
+    _snapshotsController.close();
+    _menuItemController.close();
+    _profilesController.close();
     for (final client in _clients) {
       client.close();
     }
