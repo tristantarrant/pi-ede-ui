@@ -125,13 +125,52 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
   }
 
   Widget _buildParameterTile(ControlPort port) {
-    if (port.isToggled) {
+    if (port.isEnumeration && port.scalePoints.isNotEmpty) {
+      return _buildEnumerationParameter(port);
+    } else if (port.isToggled) {
       return _buildToggleParameter(port);
     } else if (port.isTrigger) {
       return _buildTriggerParameter(port);
     } else {
       return _buildSliderParameter(port);
     }
+  }
+
+  Widget _buildEnumerationParameter(ControlPort port) {
+    // Find the current scale point (closest match)
+    ScalePoint? currentPoint;
+    for (final sp in port.scalePoints) {
+      if (sp.value == port.currentValue) {
+        currentPoint = sp;
+        break;
+      }
+    }
+    // Fallback: find closest value
+    if (currentPoint == null && port.scalePoints.isNotEmpty) {
+      currentPoint = port.scalePoints.reduce((a, b) =>
+          (a.value - port.currentValue).abs() < (b.value - port.currentValue).abs() ? a : b);
+    }
+
+    return ListTile(
+      title: Text(port.name),
+      trailing: DropdownButton<double>(
+        value: currentPoint?.value,
+        items: port.scalePoints.map((sp) {
+          return DropdownMenuItem<double>(
+            value: sp.value,
+            child: Text(sp.label),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) {
+            setState(() {
+              port.currentValue = value;
+            });
+            _sendParameterChange(port.symbol, value);
+          }
+        },
+      ),
+    );
   }
 
   Widget _buildSliderParameter(ControlPort port) {

@@ -7,6 +7,24 @@ import 'package:rdflib/rdflib.dart';
 
 final _log = Logger('Pedal');
 
+/// Represents a scale point (enumeration value) on a control port
+class ScalePoint {
+  final String label;
+  final double value;
+
+  ScalePoint({required this.label, required this.value});
+
+  Map<String, dynamic> toJson() => {
+    'label': label,
+    'value': value,
+  };
+
+  factory ScalePoint.fromJson(Map<String, dynamic> json) => ScalePoint(
+    label: json['label'],
+    value: (json['value'] as num).toDouble(),
+  );
+}
+
 /// Represents a control port (parameter) on a plugin
 class ControlPort {
   final String symbol;
@@ -18,6 +36,8 @@ class ControlPort {
   final bool isInteger;
   final bool isTrigger;
   final bool isOutput;
+  final bool isEnumeration;
+  final List<ScalePoint> scalePoints;
   double currentValue;
 
   ControlPort({
@@ -30,8 +50,11 @@ class ControlPort {
     this.isInteger = false,
     this.isTrigger = false,
     this.isOutput = false,
+    this.isEnumeration = false,
+    List<ScalePoint>? scalePoints,
     double? currentValue,
-  }) : currentValue = currentValue ?? defaultValue;
+  }) : scalePoints = scalePoints ?? [],
+       currentValue = currentValue ?? defaultValue;
 
   Map<String, dynamic> toJson() => {
     'symbol': symbol,
@@ -43,6 +66,8 @@ class ControlPort {
     'isInteger': isInteger,
     'isTrigger': isTrigger,
     'isOutput': isOutput,
+    'isEnumeration': isEnumeration,
+    'scalePoints': scalePoints.map((sp) => sp.toJson()).toList(),
   };
 
   factory ControlPort.fromJson(Map<String, dynamic> json) => ControlPort(
@@ -55,6 +80,10 @@ class ControlPort {
     isInteger: json['isInteger'] ?? false,
     isTrigger: json['isTrigger'] ?? false,
     isOutput: json['isOutput'] ?? false,
+    isEnumeration: json['isEnumeration'] ?? false,
+    scalePoints: (json['scalePoints'] as List?)
+        ?.map((sp) => ScalePoint.fromJson(sp))
+        .toList(),
   );
 
   @override
@@ -104,6 +133,8 @@ class Pedal {
           isInteger: port.isInteger,
           isTrigger: port.isTrigger,
           isOutput: port.isOutput,
+          isEnumeration: port.isEnumeration,
+          scalePoints: port.scalePoints,
           currentValue: currentVal,
         );
       }).toList();
@@ -536,19 +567,38 @@ class LV2PluginCache {
 
   /// Parse control ports from TTL content using regex
   static void _parseControlPortsWithRegex(String content, List<ControlPort> ports) {
-    // Match port blocks: [ a lv2:ControlPort, ... ; lv2:symbol "X"; ... ]
-    // Port blocks are delimited by [ and ] with optional trailing comma
-    final portBlockRegex = RegExp(
-      r'\[\s*a\s+[^;]*lv2:ControlPort[^\]]*\]',
+    // Find port block starts: [ a ...lv2:ControlPort
+    final portStartRegex = RegExp(
+      r'\[\s*a\s+[^;]*lv2:ControlPort',
       multiLine: true,
-      dotAll: true,
     );
+
+    // For each port start, find the matching closing bracket
+    final portBlocks = <String>[];
+    for (final match in portStartRegex.allMatches(content)) {
+      final start = match.start;
+      var depth = 0;
+      var end = start;
+      for (var i = start; i < content.length; i++) {
+        if (content[i] == '[') {
+          depth++;
+        } else if (content[i] == ']') {
+          depth--;
+          if (depth == 0) {
+            end = i + 1;
+            break;
+          }
+        }
+      }
+      if (end > start) {
+        portBlocks.add(content.substring(start, end));
+      }
+    }
 
     // Regex for numbers including scientific notation (e.g., 3.6e+02, 1e-05)
     final numRegex = r'([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)';
 
-    for (final match in portBlockRegex.allMatches(content)) {
-      final block = match.group(0) ?? '';
+    for (final block in portBlocks) {
 
       // Check if it's an output port
       final isOutput = block.contains('lv2:OutputPort');
@@ -578,6 +628,40 @@ class LV2PluginCache {
       final isToggled = block.contains('lv2:toggled');
       final isInteger = block.contains('lv2:integer');
       final isTrigger = block.contains('epp:trigger') || block.contains('port-props#trigger');
+      final isEnumeration = block.contains('lv2:enumeration');
+
+      // Parse scale points for enumeration ports
+      final scalePoints = <ScalePoint>[];
+      if (isEnumeration) {
+        // Match scale point blocks in either order:
+        // [ rdfs:label "Label" ; rdf:value 0 ; ] or [ rdf:value 0 ; rdfs:label "Label" ; ]
+        // The trailing ; before ] is optional
+        final scalePointRegex1 = RegExp(
+          r'\[\s*rdfs:label\s+"([^"]+)"\s*;\s*rdf:value\s+' + numRegex + r'\s*;?\s*\]',
+          multiLine: true,
+        );
+        final scalePointRegex2 = RegExp(
+          r'\[\s*rdf:value\s+' + numRegex + r'\s*;\s*rdfs:label\s+"([^"]+)"\s*;?\s*\]',
+          multiLine: true,
+        );
+
+        for (final spMatch in scalePointRegex1.allMatches(block)) {
+          final label = spMatch.group(1);
+          final value = double.tryParse(spMatch.group(2) ?? '0') ?? 0;
+          if (label != null) {
+            scalePoints.add(ScalePoint(label: label, value: value));
+          }
+        }
+        for (final spMatch in scalePointRegex2.allMatches(block)) {
+          final value = double.tryParse(spMatch.group(1) ?? '0') ?? 0;
+          final label = spMatch.group(2);
+          if (label != null) {
+            scalePoints.add(ScalePoint(label: label, value: value));
+          }
+        }
+        // Sort by value
+        scalePoints.sort((a, b) => a.value.compareTo(b.value));
+      }
 
       ports.add(ControlPort(
         symbol: symbol,
@@ -589,6 +673,8 @@ class LV2PluginCache {
         isInteger: isInteger,
         isTrigger: isTrigger,
         isOutput: isOutput,
+        isEnumeration: isEnumeration,
+        scalePoints: scalePoints,
       ));
     }
   }
