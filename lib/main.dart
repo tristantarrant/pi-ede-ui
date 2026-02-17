@@ -9,6 +9,7 @@ import 'package:pi_ede_ui/gpio_client.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedalboards.dart';
 import 'package:pi_ede_ui/qr.dart';
+import 'package:pi_ede_ui/tuner.dart';
 
 
 // C header typedef:
@@ -104,6 +105,13 @@ class _PiEdeUIState extends State<PiEdeUI> {
     });
   }
 
+  void _onTuner() {
+    setState(() {
+      _selectedWidget = 3;
+      _title = 'Tuner';
+    });
+  }
+
   void _onPowerOff(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -151,6 +159,8 @@ class _PiEdeUIState extends State<PiEdeUI> {
         );
       case 2:
         return qrWidget;
+      case 3:
+        return TunerWidget(hmiServer: hmiServer);
       default:
         return const Center(child: Text('Unknown view'));
     }
@@ -203,6 +213,13 @@ class _PiEdeUIState extends State<PiEdeUI> {
               icon: const Icon(Icons.folder),
               onPressed: () {
                 _onBanks();
+                Navigator.pop(context);
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.tune),
+              onPressed: () {
+                _onTuner();
                 Navigator.pop(context);
               },
             ),

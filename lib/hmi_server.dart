@@ -19,6 +19,18 @@ class PedalboardLoadEvent {
   PedalboardLoadEvent(this.index, this.uri);
 }
 
+/// Event emitted when tuner data is received
+class TunerEvent {
+  final double frequency;
+  final String note;
+  final int cents;
+
+  TunerEvent(this.frequency, this.note, this.cents);
+
+  /// Returns true if the tuner has a valid reading
+  bool get isValid => note != '?';
+}
+
 class HMIServer {
   late ServerSocket serverSocket;
   final List<Socket> _clients = [];
@@ -30,12 +42,16 @@ class HMIServer {
   // Stream controllers for events
   final _pedalboardChangeController = StreamController<PedalboardChangeEvent>.broadcast();
   final _pedalboardLoadController = StreamController<PedalboardLoadEvent>.broadcast();
+  final _tunerController = StreamController<TunerEvent>.broadcast();
 
   /// Stream of pedalboard change events
   Stream<PedalboardChangeEvent> get onPedalboardChange => _pedalboardChangeController.stream;
 
   /// Stream of pedalboard load events
   Stream<PedalboardLoadEvent> get onPedalboardLoad => _pedalboardLoadController.stream;
+
+  /// Stream of tuner events
+  Stream<TunerEvent> get onTuner => _tunerController.stream;
 
   HMIServer.init({int port = 9898}) {
     ServerSocket.bind(InternetAddress.anyIPv4, port).then((value) {
@@ -133,6 +149,10 @@ class HMIServer {
         _handlePedalboardNameSet(client, args);
         break;
 
+      case HMIProtocol.CMD_TUNER:
+        _handleTuner(client, args);
+        break;
+
       default:
         log.warning("Unknown command: $command");
         _sendResponse(client, -1);
@@ -191,6 +211,22 @@ class HMIServer {
     _sendResponse(client, 0);
   }
 
+  void _handleTuner(Socket client, List<String> args) {
+    if (args.length < 3) {
+      log.warning("Tuner: missing arguments");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    final frequency = double.tryParse(args[0]) ?? 0;
+    final note = args[1];
+    final cents = int.tryParse(args[2]) ?? 0;
+
+    log.fine("Tuner: freq=$frequency, note=$note, cents=$cents");
+    _tunerController.add(TunerEvent(frequency, note, cents));
+    _sendResponse(client, 0);
+  }
+
   void _sendResponse(Socket client, int status, [String? data]) {
     final response = data != null
         ? "${HMIProtocol.CMD_RESPONSE} $status $data\x00"
@@ -238,9 +274,34 @@ class HMIServer {
     broadcast(HMIProtocol.CMD_PEDALBOARD_SAVE);
   }
 
+  /// Turn the tuner on
+  void tunerOn() {
+    log.info("Turning tuner on");
+    broadcast(HMIProtocol.CMD_TUNER_ON);
+  }
+
+  /// Turn the tuner off
+  void tunerOff() {
+    log.info("Turning tuner off");
+    broadcast(HMIProtocol.CMD_TUNER_OFF);
+  }
+
+  /// Set the tuner input port (1 or 2)
+  void setTunerInput(int port) {
+    log.info("Setting tuner input to port $port");
+    broadcast('${HMIProtocol.CMD_TUNER_INPUT} $port');
+  }
+
+  /// Set the tuner reference frequency (default 440Hz)
+  void setTunerRefFreq(int freq) {
+    log.info("Setting tuner reference frequency to $freq Hz");
+    broadcast('${HMIProtocol.CMD_TUNER_REF_FREQ} $freq');
+  }
+
   void dispose() {
     _pedalboardChangeController.close();
     _pedalboardLoadController.close();
+    _tunerController.close();
     for (final client in _clients) {
       client.close();
     }
