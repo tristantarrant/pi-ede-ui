@@ -387,6 +387,13 @@ class HMIServer {
     broadcast(command);
   }
 
+  /// Set a plugin file parameter value
+  void setFileParameter(String instance, String paramUri, String path) {
+    final command = '${HMIProtocol.CMD_FILE_PARAM_SET} $instance $paramUri $path';
+    log.info("Setting file parameter: $instance/$paramUri = $path");
+    broadcast(command);
+  }
+
   /// Save the current pedalboard
   void savePedalboard() {
     log.info("Saving pedalboard");

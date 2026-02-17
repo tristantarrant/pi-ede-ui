@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
+import 'package:pi_ede_ui/file_parameter_widget.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedal.dart';
 
@@ -29,28 +30,62 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
   Widget build(BuildContext context) {
     final pedal = widget.pedal;
     final ports = pedal.controlPorts ?? [];
+    final fileParams = pedal.fileParameters ?? [];
 
     // Filter to only show input control ports (not outputs)
     final inputPorts = ports.where((p) => !p.isOutput).toList();
+
+    final hasFileParams = fileParams.isNotEmpty;
+    final hasControlPorts = inputPorts.isNotEmpty;
 
     return Column(
       children: [
         // Header
         _buildHeader(pedal),
         const Divider(height: 1),
-        // Parameter list
+        // Parameters list
         Expanded(
-          child: inputPorts.isEmpty
+          child: !hasFileParams && !hasControlPorts
               ? const Center(child: Text('No editable parameters'))
-              : ListView.builder(
-                  itemCount: inputPorts.length,
-                  itemBuilder: (context, index) {
-                    return _buildParameterTile(inputPorts[index]);
-                  },
+              : ListView(
+                  children: [
+                    // File parameters section
+                    if (hasFileParams) ...[
+                      _buildSectionHeader('Files'),
+                      ...fileParams.map((param) => FileParameterWidget(
+                        parameter: param,
+                        onFileSelected: (path) => _onFileSelected(param, path),
+                      )),
+                    ],
+                    // Control ports section
+                    if (hasControlPorts) ...[
+                      if (hasFileParams) _buildSectionHeader('Parameters'),
+                      ...inputPorts.map((port) => _buildParameterTile(port)),
+                    ],
+                  ],
                 ),
         ),
       ],
     );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: Theme.of(context).primaryColor,
+        ),
+      ),
+    );
+  }
+
+  void _onFileSelected(FileParameter param, String path) {
+    setState(() {
+      param.currentPath = path;
+    });
+    _sendFileParameterChange(param.uri, path);
   }
 
   void _savePedalboard() {
@@ -278,6 +313,27 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
       hmiServer.setParameter(instance, portSymbol, value);
     } else {
       _log.warning('No HMI server available to send parameter change');
+    }
+  }
+
+  void _sendFileParameterChange(String paramUri, String path) {
+    final pedal = widget.pedal;
+    // The instance name might have angle brackets, remove them
+    var instance = pedal.instanceName;
+    if (instance.startsWith('<')) {
+      instance = instance.substring(1);
+    }
+    if (instance.endsWith('>')) {
+      instance = instance.substring(0, instance.length - 1);
+    }
+
+    _log.info('Setting file parameter: $instance/$paramUri = $path');
+
+    final hmiServer = widget.hmiServer;
+    if (hmiServer != null) {
+      hmiServer.setFileParameter(instance, paramUri, path);
+    } else {
+      _log.warning('No HMI server available to send file parameter change');
     }
   }
 }

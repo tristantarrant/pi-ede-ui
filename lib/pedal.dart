@@ -25,6 +25,38 @@ class ScalePoint {
   );
 }
 
+/// Represents a file parameter (atom:Path) on a plugin
+class FileParameter {
+  final String uri;
+  final String label;
+  final List<String> fileTypes;
+  String? currentPath;
+
+  FileParameter({
+    required this.uri,
+    required this.label,
+    required this.fileTypes,
+    this.currentPath,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'uri': uri,
+    'label': label,
+    'fileTypes': fileTypes,
+    'currentPath': currentPath,
+  };
+
+  factory FileParameter.fromJson(Map<String, dynamic> json) => FileParameter(
+    uri: json['uri'],
+    label: json['label'],
+    fileTypes: List<String>.from(json['fileTypes'] ?? []),
+    currentPath: json['currentPath'],
+  );
+
+  @override
+  String toString() => 'FileParameter($label: $currentPath)';
+}
+
 /// Represents a control port (parameter) on a plugin
 class ControlPort {
   final String symbol;
@@ -97,12 +129,14 @@ class Pedal {
   final int instanceNumber;
   final bool enabled;
   final Map<String, double> portValues;
+  final Map<String, String> fileValues;
 
   // Plugin metadata (loaded from LV2 bundle)
   String? label;
   String? brand;
   String? thumbnailPath;
   List<ControlPort>? controlPorts;
+  List<FileParameter>? fileParameters;
 
   Pedal({
     required this.instanceName,
@@ -110,7 +144,9 @@ class Pedal {
     required this.instanceNumber,
     required this.enabled,
     Map<String, double>? portValues,
-  }) : portValues = portValues ?? {};
+    Map<String, String>? fileValues,
+  }) : portValues = portValues ?? {},
+       fileValues = fileValues ?? {};
 
   /// Load plugin metadata from its LV2 bundle
   Future<void> loadMetadata(LV2PluginCache cache) async {
@@ -138,6 +174,17 @@ class Pedal {
           currentValue: currentVal,
         );
       }).toList();
+
+      // Load file parameters and apply current values
+      fileParameters = info.fileParameters.map((param) {
+        final currentPath = fileValues[param.uri];
+        return FileParameter(
+          uri: param.uri,
+          label: param.label,
+          fileTypes: param.fileTypes,
+          currentPath: currentPath,
+        );
+      }).toList();
     }
   }
 
@@ -153,6 +200,7 @@ class LV2PluginInfo {
   final String? brand;
   final String? thumbnailPath;
   final List<ControlPort> controlPorts;
+  final List<FileParameter> fileParameters;
 
   LV2PluginInfo({
     required this.uri,
@@ -161,7 +209,9 @@ class LV2PluginInfo {
     this.brand,
     this.thumbnailPath,
     List<ControlPort>? controlPorts,
-  }) : controlPorts = controlPorts ?? [];
+    List<FileParameter>? fileParameters,
+  }) : controlPorts = controlPorts ?? [],
+       fileParameters = fileParameters ?? [];
 
   Map<String, dynamic> toJson() => {
     'uri': uri,
@@ -170,6 +220,7 @@ class LV2PluginInfo {
     'brand': brand,
     'thumbnailPath': thumbnailPath,
     'controlPorts': controlPorts.map((p) => p.toJson()).toList(),
+    'fileParameters': fileParameters.map((p) => p.toJson()).toList(),
   };
 
   factory LV2PluginInfo.fromJson(Map<String, dynamic> json) => LV2PluginInfo(
@@ -180,6 +231,9 @@ class LV2PluginInfo {
     thumbnailPath: json['thumbnailPath'],
     controlPorts: (json['controlPorts'] as List?)
         ?.map((p) => ControlPort.fromJson(p))
+        .toList(),
+    fileParameters: (json['fileParameters'] as List?)
+        ?.map((p) => FileParameter.fromJson(p))
         .toList(),
   );
 }
@@ -411,6 +465,9 @@ class LV2PluginCache {
     // Load control ports
     final controlPorts = _loadControlPortsSync(uri, bundlePath);
 
+    // Load file parameters
+    final fileParameters = _loadFileParametersSync(uri, bundlePath);
+
     return LV2PluginInfo(
       uri: uri,
       bundlePath: bundlePath,
@@ -418,6 +475,7 @@ class LV2PluginCache {
       brand: brand,
       thumbnailPath: thumbnailPath,
       controlPorts: controlPorts,
+      fileParameters: fileParameters,
     );
   }
 
@@ -676,6 +734,149 @@ class LV2PluginCache {
         isEnumeration: isEnumeration,
         scalePoints: scalePoints,
       ));
+    }
+  }
+
+  /// Load file parameters (atom:Path parameters) using regex
+  static List<FileParameter> _loadFileParametersSync(String uri, String bundlePath) {
+    final params = <FileParameter>[];
+
+    // Get plugin TTL files
+    final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
+    for (final ttlFile in ttlFiles) {
+      if (ttlFile.existsSync()) {
+        _parseFileParametersWithRegex(ttlFile.readAsStringSync(), params);
+        if (params.isNotEmpty) break;
+      }
+    }
+
+    return params;
+  }
+
+  /// Parse file parameters from TTL content using regex
+  /// File parameters are declared as patch:writable with rdfs:range atom:Path
+  static void _parseFileParametersWithRegex(String content, List<FileParameter> params) {
+    // Look for patch:writable declarations
+    // Pattern: patch:writable <parameter_uri> ;
+    // Then find the parameter definition block
+
+    // First, collect all parameter URIs declared as writable
+    final writableRegex = RegExp(
+      r'patch:writable\s+<([^>]+)>',
+      multiLine: true,
+    );
+
+    final writableUris = <String>{};
+    for (final match in writableRegex.allMatches(content)) {
+      final paramUri = match.group(1);
+      if (paramUri != null) {
+        writableUris.add(paramUri);
+      }
+    }
+
+    if (writableUris.isEmpty) return;
+
+    // Now look for parameter definitions with atom:Path range
+    // Pattern: <param_uri> a lv2:Parameter ; rdfs:label "..." ; rdfs:range atom:Path ; mod:fileTypes ...
+    // Or the same in a block format with [ ]
+
+    for (final paramUri in writableUris) {
+      final escapedUri = RegExp.escape(paramUri);
+
+      // Try to find the parameter definition block
+      // Look for: <uri> a lv2:Parameter ... .
+      final paramBlockRegex = RegExp(
+        '<$escapedUri>\\s+a\\s+lv2:Parameter\\s*([^.]*(?:\\[[^\\]]*\\][^.]*)*)',
+        multiLine: true,
+        dotAll: true,
+      );
+
+      final match = paramBlockRegex.firstMatch(content);
+      if (match == null) continue;
+
+      final block = match.group(0) ?? '';
+
+      // Check if this is an atom:Path parameter
+      if (!block.contains('atom:Path')) continue;
+
+      // Extract label
+      final labelMatch = RegExp(r'rdfs:label\s+"([^"]+)"').firstMatch(block);
+      final label = labelMatch?.group(1) ?? paramUri.split('#').last;
+
+      // Extract file types from mod:fileTypes
+      final fileTypes = <String>[];
+
+      // mod:fileTypes can be a single value or a list
+      // Single: mod:fileTypes mod:SFZFile
+      // List: mod:fileTypes mod:SFZFile , mod:AudioFile
+      final fileTypesMatch = RegExp(
+        r'mod:fileTypes\s+([^;]+)',
+        multiLine: true,
+      ).firstMatch(block);
+
+      if (fileTypesMatch != null) {
+        final typesStr = fileTypesMatch.group(1)!.trim();
+        // Split by comma and extract the type identifiers
+        final typeMatches = RegExp(r'mod:(\w+)').allMatches(typesStr);
+        for (final typeMatch in typeMatches) {
+          final typeId = typeMatch.group(1);
+          if (typeId != null) {
+            // Convert MOD type to lowercase fileType identifier
+            // e.g., SFZFile -> sfz, AudioFile -> audiosample
+            final fileType = _modTypeToFileType(typeId);
+            if (fileType != null) {
+              fileTypes.add(fileType);
+            }
+          }
+        }
+      }
+
+      if (fileTypes.isEmpty) {
+        // Default to generic file if no specific types found
+        fileTypes.add('file');
+      }
+
+      params.add(FileParameter(
+        uri: paramUri,
+        label: label,
+        fileTypes: fileTypes,
+      ));
+    }
+  }
+
+  /// Convert MOD file type identifier to standard fileType
+  static String? _modTypeToFileType(String modType) {
+    // Map MOD type identifiers to file type strings used in file_types.dart
+    switch (modType.toLowerCase()) {
+      case 'sfzfile':
+        return 'sfz';
+      case 'sf2file':
+        return 'sf2';
+      case 'audiofile':
+      case 'audiosample':
+        return 'audiosample';
+      case 'cabsimfile':
+      case 'cabsimulatorfile':
+        return 'cabsim';
+      case 'irfile':
+      case 'impulseresponsefile':
+        return 'ir';
+      case 'aidadspmodelfile':
+        return 'aidadspmodel';
+      case 'nammodelfile':
+        return 'nammodel';
+      case 'midifile':
+        return 'midifile';
+      default:
+        // Try to match common patterns
+        if (modType.toLowerCase().contains('audio')) return 'audiosample';
+        if (modType.toLowerCase().contains('sfz')) return 'sfz';
+        if (modType.toLowerCase().contains('sf2')) return 'sf2';
+        if (modType.toLowerCase().contains('cab')) return 'cabsim';
+        if (modType.toLowerCase().contains('ir')) return 'ir';
+        if (modType.toLowerCase().contains('aida')) return 'aidadspmodel';
+        if (modType.toLowerCase().contains('nam')) return 'nammodel';
+        return modType.toLowerCase();
     }
   }
 }

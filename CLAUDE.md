@@ -6,23 +6,25 @@ Flutter-based HMI (Human-Machine Interface) for MOD Audio's mod-ui system, desig
 
 ```
 lib/
-├── main.dart           # App entry point, navigation, drawer
-├── hmi_server.dart     # TCP HMI server (mod-ui connects as client)
-├── hmi_protocol.dart   # Protocol constants mirroring mod-ui's mod_protocol.py
-├── pedalboards.dart    # Pedalboard list/switcher widget
-├── pedalboard.dart     # Pedalboard model (parses TTL files)
-├── pedal.dart          # Pedal/plugin model, LV2PluginCache
-├── pedal_editor.dart   # Parameter editor for pedals
-├── bank.dart           # Bank model (loads from banks.json)
-├── banks.dart          # Bank selection widget
-├── tuner.dart          # Chromatic tuner widget
-├── snapshots.dart      # Snapshot management widget
-├── transport.dart      # Tempo/transport control widget
-├── bypass.dart         # Quick bypass and channel bypass widget
-├── midi_settings.dart  # MIDI clock source/send settings widget
-├── profiles.dart       # User profiles widget
-├── qr.dart             # Wi-Fi QR code widget
-└── gpio_client.dart    # GPIO client for hardware buttons
+├── main.dart                  # App entry point, navigation, drawer
+├── hmi_server.dart            # TCP HMI server (mod-ui connects as client)
+├── hmi_protocol.dart          # Protocol constants mirroring mod-ui's mod_protocol.py
+├── pedalboards.dart           # Pedalboard list/switcher widget
+├── pedalboard.dart            # Pedalboard model (parses TTL files)
+├── pedal.dart                 # Pedal/plugin model, LV2PluginCache, FileParameter
+├── pedal_editor.dart          # Parameter editor for pedals
+├── file_types.dart            # File type configurations for user files
+├── file_parameter_widget.dart # File parameter picker widget
+├── bank.dart                  # Bank model (loads from banks.json)
+├── banks.dart                 # Bank selection widget
+├── tuner.dart                 # Chromatic tuner widget
+├── snapshots.dart             # Snapshot management widget
+├── transport.dart             # Tempo/transport control widget
+├── bypass.dart                # Quick bypass and channel bypass widget
+├── midi_settings.dart         # MIDI clock source/send settings widget
+├── profiles.dart              # User profiles widget
+├── qr.dart                    # Wi-Fi QR code widget
+└── gpio_client.dart           # GPIO client for hardware buttons
 ```
 
 ## Architecture
@@ -37,12 +39,17 @@ lib/
 - `cps` (CMD_CONTROL_PARAM_SET): Set plugin parameter values directly
   - Format: `cps <instance> <port_symbol> <value>`
   - Added to mod-ui in `mod/mod_protocol.py` and `mod/host.py`
+- `fps` (CMD_FILE_PARAM_SET): Set plugin file parameter values
+  - Format: `fps <instance> <param_uri> <file_path>`
+  - For atom:Path parameters (samples, IRs, neural models)
 
 ### Data Paths
 - `MOD_DATA_DIR` environment variable (fallback: `$HOME/data`)
 - Pedalboards: `$MOD_DATA_DIR/pedalboards/`
 - Banks: `$MOD_DATA_DIR/banks.json`
 - LV2 plugins: `/usr/lib/lv2/`, `~/.lv2/`
+- User files: `$MOD_USER_FILES_DIR` or `/data/user-files/`
+  - Audio Samples, Speaker Cabinets IRs, Reverb IRs, SF2/SFZ Instruments, Aida DSP Models, NAM Models
 
 ## Key Classes
 
@@ -57,7 +64,8 @@ Event streams:
 
 Outgoing commands:
 - `loadPedalboard(index, {bankId})` - load pedalboard
-- `setParameter(instance, portSymbol, value)` - set plugin parameter
+- `setParameter(instance, portSymbol, value)` - set plugin control parameter
+- `setFileParameter(instance, paramUri, path)` - set plugin file parameter
 - `savePedalboard()` - save current pedalboard
 - `tunerOn/Off()`, `setTunerInput()`, `setTunerRefFreq()`
 - `loadSnapshot()`, `saveSnapshot()`, `saveSnapshotAs()`, `deleteSnapshot()`
@@ -69,7 +77,8 @@ Outgoing commands:
 ### LV2PluginCache (pedal.dart)
 - Singleton that scans LV2 plugin directories
 - Parses `manifest.ttl` and `modgui.ttl` for plugin metadata
-- Caches `LV2PluginInfo` with control ports, thumbnails, etc.
+- Caches `LV2PluginInfo` with control ports, file parameters, thumbnails, etc.
+- File parameters: Parses `patch:writable` declarations with `rdfs:range atom:Path`
 
 ### Pedalboard (pedalboard.dart)
 - Parses pedalboard TTL files using rdflib
@@ -120,3 +129,4 @@ flutter build linux   # For deployment
 - Parameter changes via `cps` are volatile (mark pedalboard modified but don't auto-save)
 - Tuner auto-disables on widget dispose
 - Some HMI features are firmware-level only (noise gate, compressor, system info)
+- Clear plugin cache after updating: `rm ~/.cache/pi-ede-ui/lv2_cache.json`
