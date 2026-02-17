@@ -29,6 +29,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   Pedal? _selectedPedal;
   StreamSubscription<PedalboardChangeEvent>? _changeSubscription;
   StreamSubscription<PedalboardLoadEvent>? _loadSubscription;
+  StreamSubscription<FileParamEvent>? _fileParamSubscription;
   PageController? _pageController;
 
   @override
@@ -85,12 +86,45 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
         );
       }
     });
+
+    _fileParamSubscription = hmi.onFileParam.listen((event) {
+      log.info("HMI file param event: instance=${event.instance}, uri=${event.paramUri}, path=${event.path}");
+      // Update the file parameter value for the matching pedal
+      if (_pedals != null) {
+        for (final pedal in _pedals!) {
+          // Check if this event is for this pedal (match instance name)
+          var instanceName = pedal.instanceName;
+          if (instanceName.startsWith('<')) {
+            instanceName = instanceName.substring(1);
+          }
+          if (instanceName.endsWith('>')) {
+            instanceName = instanceName.substring(0, instanceName.length - 1);
+          }
+          if (instanceName == event.instance) {
+            // Update the file parameter
+            if (pedal.fileParameters != null) {
+              for (final param in pedal.fileParameters!) {
+                if (param.uri == event.paramUri) {
+                  setState(() {
+                    param.currentPath = event.path;
+                  });
+                  log.info("Updated file param ${param.label} to ${event.path}");
+                  break;
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _changeSubscription?.cancel();
     _loadSubscription?.cancel();
+    _fileParamSubscription?.cancel();
     _pageController?.dispose();
     super.dispose();
   }

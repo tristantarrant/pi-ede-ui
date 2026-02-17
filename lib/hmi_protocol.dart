@@ -14,6 +14,7 @@ class HMIProtocol {
   static const String CMD_CONTROL_SET = "s";
   static const String CMD_CONTROL_PARAM_SET = "cps";
   static const String CMD_FILE_PARAM_SET = "fps";
+  static const String CMD_FILE_PARAM_CURRENT = "fpc";
   static const String CMD_CONTROL_PAGE = "ncp";
   static const String CMD_INITIAL_STATE = "is";
   static const String CMD_BANKS = "b";

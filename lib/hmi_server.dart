@@ -63,6 +63,15 @@ class ProfilesEvent {
   ProfilesEvent(this.currentIndex, this.profiles);
 }
 
+/// Event emitted when a file parameter current value is received
+class FileParamEvent {
+  final String instance;
+  final String paramUri;
+  final String path;
+
+  FileParamEvent(this.instance, this.paramUri, this.path);
+}
+
 class HMIServer {
   late ServerSocket serverSocket;
   final List<Socket> _clients = [];
@@ -78,6 +87,7 @@ class HMIServer {
   final _snapshotsController = StreamController<SnapshotsEvent>.broadcast();
   final _menuItemController = StreamController<MenuItemEvent>.broadcast();
   final _profilesController = StreamController<ProfilesEvent>.broadcast();
+  final _fileParamController = StreamController<FileParamEvent>.broadcast();
 
   /// Stream of pedalboard change events
   Stream<PedalboardChangeEvent> get onPedalboardChange => _pedalboardChangeController.stream;
@@ -96,6 +106,9 @@ class HMIServer {
 
   /// Stream of profiles events
   Stream<ProfilesEvent> get onProfiles => _profilesController.stream;
+
+  /// Stream of file parameter events
+  Stream<FileParamEvent> get onFileParam => _fileParamController.stream;
 
   HMIServer.init({int port = 9898}) {
     ServerSocket.bind(InternetAddress.anyIPv4, port).then((value) {
@@ -207,6 +220,10 @@ class HMIServer {
 
       case HMIProtocol.CMD_PROFILE_LOAD:
         _handleProfileLoad(client, args);
+        break;
+
+      case HMIProtocol.CMD_FILE_PARAM_CURRENT:
+        _handleFileParamCurrent(client, args);
         break;
 
       default:
@@ -343,6 +360,23 @@ class HMIServer {
 
     log.info("Profiles: current=$currentIndex, count=${profiles.length}");
     _profilesController.add(ProfilesEvent(currentIndex, profiles));
+    _sendResponse(client, 0);
+  }
+
+  void _handleFileParamCurrent(Socket client, List<String> args) {
+    // Format: fpc instance paramuri path
+    if (args.length < 3) {
+      log.warning("File param current: missing arguments");
+      _sendResponse(client, -1);
+      return;
+    }
+
+    final instance = args[0];
+    final paramUri = args[1];
+    final path = args.sublist(2).join(' '); // Path may contain spaces
+
+    log.info("File param current: instance=$instance, uri=$paramUri, path=$path");
+    _fileParamController.add(FileParamEvent(instance, paramUri, path));
     _sendResponse(client, 0);
   }
 

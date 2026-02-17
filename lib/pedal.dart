@@ -756,59 +756,83 @@ class LV2PluginCache {
   /// Parse file parameters from TTL content using regex
   /// File parameters are declared as patch:writable with rdfs:range atom:Path
   static void _parseFileParametersWithRegex(String content, List<FileParameter> params) {
-    // Look for patch:writable declarations
-    // Pattern: patch:writable <parameter_uri> ;
-    // Then find the parameter definition block
-
-    // First, collect all parameter URIs declared as writable
-    final writableRegex = RegExp(
-      r'patch:writable\s+<([^>]+)>',
-      multiLine: true,
-    );
-
-    final writableUris = <String>{};
-    for (final match in writableRegex.allMatches(content)) {
-      final paramUri = match.group(1);
-      if (paramUri != null) {
-        writableUris.add(paramUri);
+    // Build prefix map from @prefix declarations
+    final prefixMap = <String, String>{};
+    final prefixRegex = RegExp(r'@prefix\s+(\w+):\s+<([^>]+)>\s*\.', multiLine: true);
+    for (final match in prefixRegex.allMatches(content)) {
+      final prefix = match.group(1);
+      final uri = match.group(2);
+      if (prefix != null && uri != null) {
+        prefixMap[prefix] = uri;
       }
     }
 
-    if (writableUris.isEmpty) return;
+    // Collect all parameter references declared as writable
+    // Matches both: patch:writable <full_uri> and patch:writable prefix:name
+    final writableRefs = <String>{};
 
-    // Now look for parameter definitions with atom:Path range
-    // Pattern: <param_uri> a lv2:Parameter ; rdfs:label "..." ; rdfs:range atom:Path ; mod:fileTypes ...
-    // Or the same in a block format with [ ]
+    // Match full URIs: patch:writable <uri>
+    final writableUriRegex = RegExp(r'patch:writable\s+<([^>]+)>', multiLine: true);
+    for (final match in writableUriRegex.allMatches(content)) {
+      final uri = match.group(1);
+      if (uri != null) writableRefs.add('<$uri>');
+    }
 
-    for (final paramUri in writableUris) {
-      final escapedUri = RegExp.escape(paramUri);
+    // Match prefixed names: patch:writable prefix:name
+    final writablePrefixRegex = RegExp(r'patch:writable\s+(\w+:\w+)', multiLine: true);
+    for (final match in writablePrefixRegex.allMatches(content)) {
+      final prefixedName = match.group(1);
+      if (prefixedName != null) writableRefs.add(prefixedName);
+    }
 
-      // Try to find the parameter definition block
-      // Look for: <uri> a lv2:Parameter ... .
-      final paramBlockRegex = RegExp(
-        '<$escapedUri>\\s+a\\s+lv2:Parameter\\s*([^.]*(?:\\[[^\\]]*\\][^.]*)*)',
-        multiLine: true,
-        dotAll: true,
-      );
+    if (writableRefs.isEmpty) return;
 
-      final match = paramBlockRegex.firstMatch(content);
-      if (match == null) continue;
+    // Find all lv2:Parameter definitions with atom:Path range
+    // Match both full URI and prefixed forms
+    // Pattern: <uri> or prefix:name  a lv2:Parameter ; ... rdfs:range atom:Path
+    final paramDefRegex = RegExp(
+      r'((?:<[^>]+>)|(?:\w+:\w+))\s+a\s+lv2:Parameter\s*;([^.]*(?:\[[^\]]*\][^.]*)*)\.',
+      multiLine: true,
+      dotAll: true,
+    );
 
+    for (final match in paramDefRegex.allMatches(content)) {
+      final paramRef = match.group(1)?.trim();
       final block = match.group(0) ?? '';
+
+      if (paramRef == null) continue;
+
+      // Check if this parameter is in the writable list
+      if (!writableRefs.contains(paramRef)) continue;
 
       // Check if this is an atom:Path parameter
       if (!block.contains('atom:Path')) continue;
 
+      // Resolve the full URI
+      String paramUri;
+      if (paramRef.startsWith('<') && paramRef.endsWith('>')) {
+        paramUri = paramRef.substring(1, paramRef.length - 1);
+      } else if (paramRef.contains(':')) {
+        final parts = paramRef.split(':');
+        final prefix = parts[0];
+        final localName = parts[1];
+        final baseUri = prefixMap[prefix];
+        if (baseUri != null) {
+          paramUri = '$baseUri$localName';
+        } else {
+          paramUri = paramRef;
+        }
+      } else {
+        paramUri = paramRef;
+      }
+
       // Extract label
       final labelMatch = RegExp(r'rdfs:label\s+"([^"]+)"').firstMatch(block);
-      final label = labelMatch?.group(1) ?? paramUri.split('#').last;
+      final label = labelMatch?.group(1) ?? paramUri.split('#').last.split('/').last;
 
       // Extract file types from mod:fileTypes
       final fileTypes = <String>[];
 
-      // mod:fileTypes can be a single value or a list
-      // Single: mod:fileTypes mod:SFZFile
-      // List: mod:fileTypes mod:SFZFile , mod:AudioFile
       final fileTypesMatch = RegExp(
         r'mod:fileTypes\s+([^;]+)',
         multiLine: true,
@@ -816,23 +840,34 @@ class LV2PluginCache {
 
       if (fileTypesMatch != null) {
         final typesStr = fileTypesMatch.group(1)!.trim();
-        // Split by comma and extract the type identifiers
-        final typeMatches = RegExp(r'mod:(\w+)').allMatches(typesStr);
-        for (final typeMatch in typeMatches) {
-          final typeId = typeMatch.group(1);
-          if (typeId != null) {
-            // Convert MOD type to lowercase fileType identifier
-            // e.g., SFZFile -> sfz, AudioFile -> audiosample
-            final fileType = _modTypeToFileType(typeId);
-            if (fileType != null) {
-              fileTypes.add(fileType);
+
+        // Check if it's a quoted string (e.g., "nammodel,aidadspmodel,nam")
+        final quotedMatch = RegExp(r'"([^"]+)"').firstMatch(typesStr);
+        if (quotedMatch != null) {
+          // Parse comma-separated string
+          final types = quotedMatch.group(1)!.split(',');
+          for (final type in types) {
+            final normalizedType = _normalizeFileType(type.trim());
+            if (normalizedType != null && !fileTypes.contains(normalizedType)) {
+              fileTypes.add(normalizedType);
+            }
+          }
+        } else {
+          // Try mod:TypeName format
+          final typeMatches = RegExp(r'mod:(\w+)').allMatches(typesStr);
+          for (final typeMatch in typeMatches) {
+            final typeId = typeMatch.group(1);
+            if (typeId != null) {
+              final fileType = _modTypeToFileType(typeId);
+              if (fileType != null && !fileTypes.contains(fileType)) {
+                fileTypes.add(fileType);
+              }
             }
           }
         }
       }
 
       if (fileTypes.isEmpty) {
-        // Default to generic file if no specific types found
         fileTypes.add('file');
       }
 
@@ -841,6 +876,43 @@ class LV2PluginCache {
         label: label,
         fileTypes: fileTypes,
       ));
+    }
+  }
+
+  /// Normalize a file type string to our standard identifiers
+  static String? _normalizeFileType(String type) {
+    final lower = type.toLowerCase();
+    switch (lower) {
+      case 'nammodel':
+      case 'nam':
+        return 'nammodel';
+      case 'aidadspmodel':
+      case 'aidax':
+      case 'aidiax':
+        return 'aidadspmodel';
+      case 'cabsim':
+      case 'cab':
+        return 'cabsim';
+      case 'ir':
+        return 'ir';
+      case 'wav':
+      case 'audio':
+      case 'audiosample':
+      case 'flac':
+      case 'ogg':
+        return 'audiosample';
+      case 'sf2':
+        return 'sf2';
+      case 'sfz':
+        return 'sfz';
+      case 'json':
+        // JSON can be AIDA-X model
+        return 'aidadspmodel';
+      case 'midi':
+      case 'mid':
+        return 'midifile';
+      default:
+        return lower;
     }
   }
 
