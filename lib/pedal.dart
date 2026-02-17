@@ -518,131 +518,78 @@ class LV2PluginCache {
     return null;
   }
 
-  /// Load control ports synchronously
+  /// Load control ports synchronously using regex (rdflib can't handle port lists)
   static List<ControlPort> _loadControlPortsSync(String uri, String bundlePath) {
     final ports = <ControlPort>[];
-    final manifestFile = File('$bundlePath/manifest.ttl');
-    if (!manifestFile.existsSync()) return ports;
 
-    try {
-      final manifestGraph = Graph();
-      manifestGraph.parseTurtle(manifestFile.readAsStringSync());
-
-      // Find rdfs:seeAlso references for this plugin
-      final seeAlsoTriples = manifestGraph.triples.where((t) =>
-          t.sub.value == uri &&
-          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#seeAlso');
-
-      for (final seeAlso in seeAlsoTriples) {
-        final ref = seeAlso.obj;
-        if (ref is URIRef && !ref.value.contains('modgui')) {
-          final ttlPath = '$bundlePath/${ref.value}';
-          final ttlFile = File(ttlPath);
-          if (ttlFile.existsSync()) {
-            _parseControlPortsFromTtlSync(uri, ttlFile, ports);
-          }
-        }
+    // Get plugin TTL files
+    final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
+    for (final ttlFile in ttlFiles) {
+      if (ttlFile.existsSync()) {
+        _parseControlPortsWithRegex(ttlFile.readAsStringSync(), ports);
+        if (ports.isNotEmpty) break;
       }
-    } catch (e) {
-      // Skip problematic files
     }
 
     return ports;
   }
 
-  /// Parse control ports from TTL file
-  static void _parseControlPortsFromTtlSync(
-      String pluginUri, File ttlFile, List<ControlPort> ports) {
-    try {
-      final g = Graph();
-      g.parseTurtle(ttlFile.readAsStringSync());
+  /// Parse control ports from TTL content using regex
+  static void _parseControlPortsWithRegex(String content, List<ControlPort> ports) {
+    // Match port blocks: [ a lv2:ControlPort, ... ; lv2:symbol "X"; ... ]
+    // Port blocks are delimited by [ and ] with optional trailing comma
+    final portBlockRegex = RegExp(
+      r'\[\s*a\s+[^;]*lv2:ControlPort[^\]]*\]',
+      multiLine: true,
+      dotAll: true,
+    );
 
-      // Find all port definitions
-      final portTriples = g.triples.where((t) =>
-          t.sub.value == pluginUri &&
-          t.pre.value == 'http://lv2plug.in/ns/lv2core#port');
+    // Regex for numbers including scientific notation (e.g., 3.6e+02, 1e-05)
+    final numRegex = r'([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)';
 
-      for (final portTriple in portTriples) {
-        final portNode = portTriple.obj;
+    for (final match in portBlockRegex.allMatches(content)) {
+      final block = match.group(0) ?? '';
 
-        // Check if it's a control port
-        final typeTriples = g.triples.where((t) =>
-            t.sub == portNode &&
-            t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type');
+      // Check if it's an output port
+      final isOutput = block.contains('lv2:OutputPort');
 
-        bool isControlPort = false;
-        bool isOutputPort = false;
+      // Extract symbol
+      final symbolMatch = RegExp(r'lv2:symbol\s+"([^"]+)"').firstMatch(block);
+      if (symbolMatch == null) continue;
+      final symbol = symbolMatch.group(1)!;
 
-        for (final typeTriple in typeTriples) {
-          final typeVal = typeTriple.obj.value;
-          if (typeVal == 'http://lv2plug.in/ns/lv2core#ControlPort') {
-            isControlPort = true;
-          } else if (typeVal == 'http://lv2plug.in/ns/lv2core#OutputPort') {
-            isOutputPort = true;
-          }
-        }
+      // Extract name
+      final nameMatch = RegExp(r'lv2:name\s+"([^"]+)"').firstMatch(block);
+      final name = nameMatch?.group(1) ?? symbol;
 
-        if (!isControlPort) continue;
+      // Extract minimum (handles scientific notation)
+      final minMatch = RegExp('lv2:minimum\\s+$numRegex').firstMatch(block);
+      final minimum = double.tryParse(minMatch?.group(1) ?? '0') ?? 0;
 
-        // Get port properties
-        String? symbol;
-        String? name;
-        double minimum = 0;
-        double maximum = 1;
-        double defaultValue = 0;
-        bool isToggled = false;
-        bool isInteger = false;
-        bool isTrigger = false;
+      // Extract maximum (handles scientific notation)
+      final maxMatch = RegExp('lv2:maximum\\s+$numRegex').firstMatch(block);
+      final maximum = double.tryParse(maxMatch?.group(1) ?? '1') ?? 1;
 
-        for (final propTriple in g.triples.where((t) => t.sub == portNode)) {
-          final pred = propTriple.pre.value;
-          final obj = propTriple.obj;
+      // Extract default (handles scientific notation)
+      final defMatch = RegExp('lv2:default\\s+$numRegex').firstMatch(block);
+      final defaultValue = double.tryParse(defMatch?.group(1) ?? '0') ?? 0;
 
-          switch (pred) {
-            case 'http://lv2plug.in/ns/lv2core#symbol':
-              symbol = (obj as Literal).value;
-              break;
-            case 'http://lv2plug.in/ns/lv2core#name':
-              name = (obj as Literal).value;
-              break;
-            case 'http://lv2plug.in/ns/lv2core#minimum':
-              minimum = double.tryParse((obj as Literal).value) ?? 0;
-              break;
-            case 'http://lv2plug.in/ns/lv2core#maximum':
-              maximum = double.tryParse((obj as Literal).value) ?? 1;
-              break;
-            case 'http://lv2plug.in/ns/lv2core#default':
-              defaultValue = double.tryParse((obj as Literal).value) ?? 0;
-              break;
-            case 'http://lv2plug.in/ns/lv2core#portProperty':
-              final propVal = obj.value;
-              if (propVal == 'http://lv2plug.in/ns/lv2core#toggled') {
-                isToggled = true;
-              } else if (propVal == 'http://lv2plug.in/ns/lv2core#integer') {
-                isInteger = true;
-              } else if (propVal == 'http://lv2plug.in/ns/ext/port-props#trigger') {
-                isTrigger = true;
-              }
-              break;
-          }
-        }
+      // Check port properties
+      final isToggled = block.contains('lv2:toggled');
+      final isInteger = block.contains('lv2:integer');
+      final isTrigger = block.contains('epp:trigger') || block.contains('port-props#trigger');
 
-        if (symbol != null) {
-          ports.add(ControlPort(
-            symbol: symbol,
-            name: name ?? symbol,
-            minimum: minimum,
-            maximum: maximum,
-            defaultValue: defaultValue,
-            isToggled: isToggled,
-            isInteger: isInteger,
-            isTrigger: isTrigger,
-            isOutput: isOutputPort,
-          ));
-        }
-      }
-    } catch (e) {
-      // Skip problematic files
+      ports.add(ControlPort(
+        symbol: symbol,
+        name: name,
+        minimum: minimum,
+        maximum: maximum,
+        defaultValue: defaultValue,
+        isToggled: isToggled,
+        isInteger: isInteger,
+        isTrigger: isTrigger,
+        isOutput: isOutput,
+      ));
     }
   }
 }

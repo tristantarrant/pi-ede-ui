@@ -1,6 +1,8 @@
+import 'dart:developer' as developer;
 import 'dart:ffi' as ffi;
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:pi_ede_ui/bank.dart';
@@ -28,13 +30,50 @@ const accentColor = Colors.orange;
 final log = Logger(appName);
 
 void main() {
-  Logger.root.level = Level.INFO; // defaults to Level.INFO
-  Logger.root.onRecord.listen((record) {
-    if (record.loggerName != "term") {
-      print('${record.time} ${record.level.name} [${record.loggerName}] ${record.message}');
-    }
-  });
+  _setupLogging();
   runApp(const UI());
+}
+
+void _setupLogging() {
+  // Set log level based on build mode
+  Logger.root.level = kDebugMode ? Level.ALL : Level.INFO;
+
+  Logger.root.onRecord.listen((record) {
+    // Skip noisy loggers
+    if (record.loggerName == "term") return;
+
+    // Map logging levels to severity for dart:developer
+    final int level;
+    switch (record.level.name) {
+      case 'FINEST':
+      case 'FINER':
+      case 'FINE':
+        level = 500; // DiagnosticLevel.debug
+        break;
+      case 'CONFIG':
+      case 'INFO':
+        level = 800; // DiagnosticLevel.info
+        break;
+      case 'WARNING':
+        level = 900; // DiagnosticLevel.warning
+        break;
+      case 'SEVERE':
+      case 'SHOUT':
+        level = 1000; // DiagnosticLevel.error
+        break;
+      default:
+        level = 800;
+    }
+
+    developer.log(
+      record.message,
+      time: record.time,
+      level: level,
+      name: record.loggerName,
+      error: record.error,
+      stackTrace: record.stackTrace,
+    );
+  });
 }
 
 class UI extends StatelessWidget {
