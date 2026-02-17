@@ -74,6 +74,8 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     Directory dir = Directory("$home/.pedalboards");
     log.info("Loading pedalboards $dir");
     var pDirs = dir.listSync(recursive: false).toList();
+    // Sort by path to match mod-ui's Lilv enumeration order
+    pDirs.sort((a, b) => a.path.compareTo(b.path));
     for (var pDir in pDirs) {
       pedalboards.add(Pedalboard.load(pDir));
     }
