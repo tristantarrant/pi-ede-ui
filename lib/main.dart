@@ -247,93 +247,100 @@ class _PiEdeUIState extends State<PiEdeUI> {
       ),
       body: _buildBody(),
       drawer: Drawer(
-        width: 64,
         child: ListView(
-          // Remove any padding from the ListView.
           padding: EdgeInsets.zero,
           children: [
-            IconButton(
-              icon: const Icon(Icons.music_note),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.music_note),
+              title: const Text('Pedalboards'),
+              selected: _selectedWidget == 0,
+              onTap: () {
                 _onPedalboard();
                 Navigator.pop(context);
               },
-              tooltip: 'Pedalboards',
             ),
-            IconButton(
-              icon: const Icon(Icons.folder),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.folder),
+              title: const Text('Banks'),
+              selected: _selectedWidget == 1,
+              onTap: () {
                 _onBanks();
                 Navigator.pop(context);
               },
-              tooltip: 'Banks',
             ),
-            IconButton(
-              icon: const Icon(Icons.camera),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.camera),
+              title: const Text('Snapshots'),
+              selected: _selectedWidget == 4,
+              onTap: () {
                 _onSnapshots();
                 Navigator.pop(context);
               },
-              tooltip: 'Snapshots',
             ),
             const Divider(),
-            IconButton(
-              icon: const Icon(Icons.tune),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('Tuner'),
+              selected: _selectedWidget == 3,
+              onTap: () {
                 _onTuner();
                 Navigator.pop(context);
               },
-              tooltip: 'Tuner',
             ),
-            IconButton(
-              icon: const Icon(Icons.speed),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.speed),
+              title: const Text('Transport'),
+              selected: _selectedWidget == 5,
+              onTap: () {
                 _onTransport();
                 Navigator.pop(context);
               },
-              tooltip: 'Transport',
             ),
-            IconButton(
-              icon: const Icon(Icons.volume_off),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.volume_off),
+              title: const Text('Bypass'),
+              selected: _selectedWidget == 6,
+              onTap: () {
                 _onBypass();
                 Navigator.pop(context);
               },
-              tooltip: 'Bypass',
             ),
             const Divider(),
-            IconButton(
-              icon: const Icon(Icons.piano),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.piano),
+              title: const Text('MIDI'),
+              selected: _selectedWidget == 7,
+              onTap: () {
                 _onMIDI();
                 Navigator.pop(context);
               },
-              tooltip: 'MIDI Settings',
             ),
-            IconButton(
-              icon: const Icon(Icons.person),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Profiles'),
+              selected: _selectedWidget == 8,
+              onTap: () {
                 _onProfiles();
                 Navigator.pop(context);
               },
-              tooltip: 'Profiles',
             ),
-            IconButton(
-              icon: const Icon(Icons.wifi),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.wifi),
+              title: const Text('Wi-Fi'),
+              selected: _selectedWidget == 2,
+              onTap: () {
                 _onWiFi();
                 Navigator.pop(context);
               },
-              tooltip: 'Wi-Fi',
             ),
             const Divider(),
-            IconButton(
-              icon: const Icon(Icons.power_off),
-              onPressed: () {
+            ListTile(
+              leading: const Icon(Icons.power_off),
+              title: const Text('Shutdown'),
+              onTap: () {
                 Navigator.pop(context);
                 _onPowerOff(context);
               },
-              tooltip: 'Shutdown',
             ),
           ],
         ),

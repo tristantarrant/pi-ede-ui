@@ -29,6 +29,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   Pedal? _selectedPedal;
   StreamSubscription<PedalboardChangeEvent>? _changeSubscription;
   StreamSubscription<PedalboardLoadEvent>? _loadSubscription;
+  PageController? _pageController;
 
   @override
   void initState() {
@@ -50,6 +51,11 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           _pedals = null;
           _selectedPedal = null;
         });
+        _pageController?.animateToPage(
+          event.index,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
       } else {
         log.warning("Invalid pedalboard index: ${event.index}");
       }
@@ -59,20 +65,24 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       log.info("HMI pedalboard load event: index=${event.index}, uri=${event.uri}");
       // Find pedalboard by URI if possible, otherwise use index
       final idx = pedalboards.indexWhere((pb) => pb.path.endsWith(event.uri));
+      int? targetIndex;
       if (idx >= 0) {
-        setState(() {
-          activePedalboard = idx;
-          _editMode = false;
-          _pedals = null;
-          _selectedPedal = null;
-        });
+        targetIndex = idx;
       } else if (event.index >= 0 && event.index < pedalboards.length) {
+        targetIndex = event.index;
+      }
+      if (targetIndex != null) {
         setState(() {
-          activePedalboard = event.index;
+          activePedalboard = targetIndex!;
           _editMode = false;
           _pedals = null;
           _selectedPedal = null;
         });
+        _pageController?.animateToPage(
+          targetIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
       }
     });
   }
@@ -81,6 +91,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   void dispose() {
     _changeSubscription?.cancel();
     _loadSubscription?.cancel();
+    _pageController?.dispose();
     super.dispose();
   }
 
@@ -95,6 +106,8 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     for (var pDir in pDirs) {
       pedalboards.add(Pedalboard.load(pDir));
     }
+    _pageController?.dispose();
+    _pageController = PageController(initialPage: 0);
     setState(() {
       activePedalboard = 0;
     });
@@ -104,30 +117,6 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   @override
   String toStringShort() {
     return activePedalboard < 0 ? 'Pedalboard' : pedalboards[activePedalboard].name;
-  }
-
-  void _left() {
-    if (activePedalboard > 0) {
-      final newIndex = activePedalboard - 1;
-      setState(() {
-        activePedalboard = newIndex;
-        _pedals = null;
-        _selectedPedal = null;
-      });
-      widget.hmiServer?.loadPedalboard(newIndex);
-    }
-  }
-
-  void _right() {
-    if (activePedalboard < pedalboards.length - 1) {
-      final newIndex = activePedalboard + 1;
-      setState(() {
-        activePedalboard = newIndex;
-        _pedals = null;
-        _selectedPedal = null;
-      });
-      widget.hmiServer?.loadPedalboard(newIndex);
-    }
   }
 
   void _toggleEditMode() async {
@@ -156,61 +145,77 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     }
   }
 
+  Widget _buildPedalboardPage(int index) {
+    final pedalboard = pedalboards[index];
+    final thumbnailFile = File("${pedalboard.path}/thumbnail.png");
+    final hasThumbnail = thumbnailFile.existsSync();
+
+    return hasThumbnail
+        ? Stack(children: [
+            Image.asset(
+              'assets/pedalboard.png',
+              width: double.infinity,
+              height: double.infinity,
+              fit: BoxFit.cover,
+            ),
+            Image(image: FileImage(thumbnailFile)),
+            Center(
+                child: Text(
+                  pedalboard.name,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 50,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black,
+                        offset: Offset(5.0, 5.0),
+                        blurRadius: 10.0,
+                      ),
+                      Shadow(
+                        color: Colors.blue.shade200,
+                        offset: Offset(-5.0, -5.0),
+                        blurRadius: 8.0,
+                      ),
+                    ],
+                  ),
+                ))
+          ])
+        : Image.asset(
+            'assets/pedalboard.png',
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+          );
+  }
+
   Widget _buildPedalboardView() {
+    if (pedalboards.isEmpty || _pageController == null) {
+      return Image.asset(
+        'assets/pedalboard.png',
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+      );
+    }
+
     return Stack(
       children: [
-        Row(
-          children: [
-            IconButton(
-                icon: const Icon(Icons.chevron_left),
-                onPressed: activePedalboard > 0
-                    ? () {
-                        _left();
-                      }
-                    : null),
-            Expanded(
-                child: (activePedalboard < 0 ||
-                        !File("${pedalboards[activePedalboard].path}/thumbnail.png").existsSync())
-                    ? Image.asset(
-                        'assets/pedalboard.png',
-                        fit: BoxFit.cover,
-                      )
-                    : Stack(children: [
-                        Image.asset(
-                          'assets/pedalboard.png',
-                        ),
-                        Image(image: FileImage(File('${pedalboards[activePedalboard].path}/thumbnail.png'))),
-                        Center(
-                            child: Text(
-                              pedalboards[activePedalboard].name,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 50,
-                                fontWeight: FontWeight.bold,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black,
-                                    offset: Offset(5.0, 5.0),
-                                    blurRadius: 10.0,
-                                  ),
-                                  Shadow(
-                                    color: Colors.blue.shade200,
-                                    offset: Offset(-5.0, -5.0),
-                                    blurRadius: 8.0,
-                                  ),
-                                ],
-                              ),
-                            ))
-                      ])),
-            IconButton(
-                icon: const Icon(Icons.chevron_right),
-                onPressed: activePedalboard >= 0
-                    ? () {
-                        _right();
-                      }
-                    : null),
-          ],
+        PageView.builder(
+          controller: _pageController,
+          itemCount: pedalboards.length,
+          onPageChanged: (index) {
+            if (index != activePedalboard) {
+              setState(() {
+                activePedalboard = index;
+                _pedals = null;
+                _selectedPedal = null;
+              });
+              widget.hmiServer?.loadPedalboard(index);
+            }
+          },
+          itemBuilder: (context, index) => _buildPedalboardPage(index),
         ),
         // Edit button overlay
         Positioned(
