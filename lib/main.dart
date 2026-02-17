@@ -3,6 +3,8 @@ import 'dart:ffi' as ffi;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
+import 'package:pi_ede_ui/bank.dart';
+import 'package:pi_ede_ui/banks.dart';
 import 'package:pi_ede_ui/gpio_client.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedalboards.dart';
@@ -57,27 +59,47 @@ class PiEdeUI extends StatefulWidget {
 class _PiEdeUIState extends State<PiEdeUI> {
   final HMIServer hmiServer = HMIServer.init();
   final GPIOClient gpioClient = GPIOClient.init();
-  late final Widget pedalBoardsWidget = PedalboardsWidget(hmiServer: hmiServer);
   final Widget qrWidget = Center(child: LocalAddressQRWidget());
-  late final List<Widget> bodyWidgets = [pedalBoardsWidget, qrWidget];
   int _selectedWidget = 0;
   String _title = appName;
+
+  // Bank state
+  int _currentBankId = 1;
+  String _currentBankName = 'All Pedalboards';
 
   @override
   void initState() {
     super.initState();
   }
 
+  void _onBankSelected(Bank bank) {
+    setState(() {
+      _currentBankId = bank.id;
+      _currentBankName = bank.title;
+      _selectedWidget = 0; // Switch back to pedalboards view
+      _title = 'Pedalboards';
+    });
+    hmiServer.setCurrentBank(_currentBankId);
+    Navigator.pop(context); // Close drawer
+  }
+
   void _onPedalboard() {
     setState(() {
       _selectedWidget = 0;
-      _title = bodyWidgets[0].toStringShort();
+      _title = 'Pedalboards';
+    });
+  }
+
+  void _onBanks() {
+    setState(() {
+      _selectedWidget = 1;
+      _title = 'Banks';
     });
   }
 
   void _onWiFi() {
     setState(() {
-      _selectedWidget = 1;
+      _selectedWidget = 2;
       _title = 'Wi-Fi';
     });
   }
@@ -118,6 +140,22 @@ class _PiEdeUIState extends State<PiEdeUI> {
     calloc.free(cmdP);
   }
 
+  Widget _buildBody() {
+    switch (_selectedWidget) {
+      case 0:
+        return PedalboardsWidget(hmiServer: hmiServer, bankId: _currentBankId);
+      case 1:
+        return BanksWidget(
+          selectedBankId: _currentBankId,
+          onBankSelected: _onBankSelected,
+        );
+      case 2:
+        return qrWidget;
+      default:
+        return const Center(child: Text('Unknown view'));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -135,8 +173,19 @@ class _PiEdeUIState extends State<PiEdeUI> {
             );
           },
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Center(
+              child: Text(
+                _currentBankName,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+        ],
       ),
-      body: bodyWidgets[_selectedWidget],
+      body: _buildBody(),
       drawer: Drawer(
         width: 64,
         child: ListView(
@@ -147,6 +196,13 @@ class _PiEdeUIState extends State<PiEdeUI> {
               icon: const Icon(Icons.music_note),
               onPressed: () {
                 _onPedalboard();
+                Navigator.pop(context);
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.folder),
+              onPressed: () {
+                _onBanks();
                 Navigator.pop(context);
               },
             ),

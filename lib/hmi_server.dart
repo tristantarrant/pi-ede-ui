@@ -24,6 +24,9 @@ class HMIServer {
   final List<Socket> _clients = [];
   final Map<Socket, List<int>> _buffers = {};
 
+  // Current bank ID for pedalboard loading
+  int _currentBankId = 1;
+
   // Stream controllers for events
   final _pedalboardChangeController = StreamController<PedalboardChangeEvent>.broadcast();
   final _pedalboardLoadController = StreamController<PedalboardLoadEvent>.broadcast();
@@ -205,10 +208,20 @@ class HMIServer {
     log.fine("Broadcast: $command");
   }
 
-  /// Request mod-ui to load a pedalboard
-  void loadPedalboard(int pedalboardIndex, {int bankId = 1}) {
-    final command = '${HMIProtocol.CMD_PEDALBOARD_LOAD} $bankId $pedalboardIndex';
-    log.info("Requesting pedalboard load: bankId=$bankId, index=$pedalboardIndex");
+  /// Set the current bank ID for pedalboard operations
+  void setCurrentBank(int bankId) {
+    _currentBankId = bankId;
+    log.info("Current bank set to: $bankId");
+  }
+
+  /// Get the current bank ID
+  int get currentBankId => _currentBankId;
+
+  /// Request mod-ui to load a pedalboard from the current bank
+  void loadPedalboard(int pedalboardIndex, {int? bankId}) {
+    final effectiveBankId = bankId ?? _currentBankId;
+    final command = '${HMIProtocol.CMD_PEDALBOARD_LOAD} $effectiveBankId $pedalboardIndex';
+    log.info("Requesting pedalboard load: bankId=$effectiveBankId, index=$pedalboardIndex");
     broadcast(command);
   }
 

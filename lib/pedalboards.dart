@@ -10,8 +10,9 @@ final log = Logger('Pedalboards');
 
 class PedalboardsWidget extends StatefulWidget {
   final HMIServer? hmiServer;
+  final int bankId;
 
-  const PedalboardsWidget({super.key, this.hmiServer});
+  const PedalboardsWidget({super.key, this.hmiServer, this.bankId = 1});
 
   @override
   State<PedalboardsWidget> createState() => _PedalboardsWidgetState();
