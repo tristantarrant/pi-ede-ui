@@ -201,6 +201,12 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       setState(() {
         _editMode = false;
       });
+      // Jump to the active pedalboard page after rebuild
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_pageController != null && _pageController!.hasClients) {
+          _pageController!.jumpToPage(activePedalboard);
+        }
+      });
     } else {
       setState(() {
         _editMode = true;
