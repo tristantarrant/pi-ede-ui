@@ -12,6 +12,7 @@ class HMIProtocol {
   static const String CMD_CONTROL_REMOVE = "d";
   static const String CMD_CONTROL_GET = "g";
   static const String CMD_CONTROL_SET = "s";
+  static const String CMD_CONTROL_PARAM_SET = "cps";
   static const String CMD_CONTROL_PAGE = "ncp";
   static const String CMD_INITIAL_STATE = "is";
   static const String CMD_BANKS = "b";

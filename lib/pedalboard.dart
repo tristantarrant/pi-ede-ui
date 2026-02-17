@@ -76,11 +76,31 @@ class Pedalboard {
           }
         }
 
+        // Find port values for this instance
+        // Ports are named like <instanceName/portSymbol> with ingen:value
+        final portValues = <String, double>{};
+        final portPrefix = '$instanceName/';
+
+        for (final triple in g.triples) {
+          if (triple.sub.value.startsWith(portPrefix) &&
+              triple.pre.value == 'http://drobilla.net/ns/ingen#value') {
+            final portSymbol = triple.sub.value.substring(portPrefix.length);
+            final valueObj = triple.obj;
+            if (valueObj is Literal) {
+              final value = double.tryParse(valueObj.value);
+              if (value != null) {
+                portValues[portSymbol] = value;
+              }
+            }
+          }
+        }
+
         _pedals!.add(Pedal(
           instanceName: instanceName,
           pluginUri: pluginUri,
           instanceNumber: instanceNumber,
           enabled: enabled,
+          portValues: portValues,
         ));
       }
 

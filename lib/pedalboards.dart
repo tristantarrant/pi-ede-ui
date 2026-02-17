@@ -6,6 +6,7 @@ import 'package:logging/logging.dart';
 import 'package:pi_ede_ui/hmi_server.dart';
 import 'package:pi_ede_ui/pedalboard.dart';
 import 'package:pi_ede_ui/pedal.dart';
+import 'package:pi_ede_ui/pedal_editor.dart';
 
 final log = Logger('Pedalboards');
 
@@ -25,6 +26,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   var _editMode = false;
   List<Pedal>? _pedals;
   bool _loadingPedals = false;
+  Pedal? _selectedPedal;
   StreamSubscription<PedalboardChangeEvent>? _changeSubscription;
   StreamSubscription<PedalboardLoadEvent>? _loadSubscription;
 
@@ -46,6 +48,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           activePedalboard = event.index;
           _editMode = false;
           _pedals = null;
+          _selectedPedal = null;
         });
       } else {
         log.warning("Invalid pedalboard index: ${event.index}");
@@ -61,12 +64,14 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           activePedalboard = idx;
           _editMode = false;
           _pedals = null;
+          _selectedPedal = null;
         });
       } else if (event.index >= 0 && event.index < pedalboards.length) {
         setState(() {
           activePedalboard = event.index;
           _editMode = false;
           _pedals = null;
+          _selectedPedal = null;
         });
       }
     });
@@ -107,6 +112,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       setState(() {
         activePedalboard = newIndex;
         _pedals = null;
+        _selectedPedal = null;
       });
       widget.hmiServer?.loadPedalboard(newIndex);
     }
@@ -118,6 +124,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       setState(() {
         activePedalboard = newIndex;
         _pedals = null;
+        _selectedPedal = null;
       });
       widget.hmiServer?.loadPedalboard(newIndex);
     }
@@ -305,8 +312,10 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
         color: pedal.enabled ? Colors.green : Colors.grey,
       ),
       onTap: () {
-        // TODO: Open pedal parameter editor
-        log.info('Tapped on pedal: ${pedal.label}');
+        log.info('Opening editor for pedal: ${pedal.label}');
+        setState(() {
+          _selectedPedal = pedal;
+        });
       },
     );
   }
@@ -320,12 +329,33 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     );
   }
 
+  Widget _buildPedalEditorView() {
+    return PedalEditorWidget(
+      pedal: _selectedPedal!,
+      hmiServer: widget.hmiServer,
+      onBack: () {
+        setState(() {
+          _selectedPedal = null;
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    Widget child;
+    if (_selectedPedal != null) {
+      child = _buildPedalEditorView();
+    } else if (_editMode) {
+      child = _buildPedalListView();
+    } else {
+      child = _buildPedalboardView();
+    }
+
     return SizedBox(
       width: double.infinity,
       height: double.infinity,
-      child: _editMode ? _buildPedalListView() : _buildPedalboardView(),
+      child: child,
     );
   }
 }

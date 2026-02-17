@@ -225,6 +225,19 @@ class HMIServer {
     broadcast(command);
   }
 
+  /// Set a plugin parameter value
+  void setParameter(String instance, String portSymbol, double value) {
+    final command = '${HMIProtocol.CMD_CONTROL_PARAM_SET} $instance $portSymbol $value';
+    log.info("Setting parameter: $instance/$portSymbol = $value");
+    broadcast(command);
+  }
+
+  /// Save the current pedalboard
+  void savePedalboard() {
+    log.info("Saving pedalboard");
+    broadcast(HMIProtocol.CMD_PEDALBOARD_SAVE);
+  }
+
   void dispose() {
     _pedalboardChangeController.close();
     _pedalboardLoadController.close();

@@ -1,0 +1,244 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
+import 'package:pi_ede_ui/hmi_server.dart';
+import 'package:pi_ede_ui/pedal.dart';
+
+final _log = Logger('PedalEditor');
+
+class PedalEditorWidget extends StatefulWidget {
+  final Pedal pedal;
+  final HMIServer? hmiServer;
+  final VoidCallback onBack;
+
+  const PedalEditorWidget({
+    super.key,
+    required this.pedal,
+    this.hmiServer,
+    required this.onBack,
+  });
+
+  @override
+  State<PedalEditorWidget> createState() => _PedalEditorWidgetState();
+}
+
+class _PedalEditorWidgetState extends State<PedalEditorWidget> {
+
+  @override
+  Widget build(BuildContext context) {
+    final pedal = widget.pedal;
+    final ports = pedal.controlPorts ?? [];
+
+    // Filter to only show input control ports (not outputs)
+    final inputPorts = ports.where((p) => !p.isOutput).toList();
+
+    return Column(
+      children: [
+        // Header
+        _buildHeader(pedal),
+        const Divider(height: 1),
+        // Parameter list
+        Expanded(
+          child: inputPorts.isEmpty
+              ? const Center(child: Text('No editable parameters'))
+              : ListView.builder(
+                  itemCount: inputPorts.length,
+                  itemBuilder: (context, index) {
+                    return _buildParameterTile(inputPorts[index]);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  void _savePedalboard() {
+    final hmiServer = widget.hmiServer;
+    if (hmiServer != null) {
+      hmiServer.savePedalboard();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pedalboard saved'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  Widget _buildHeader(Pedal pedal) {
+    Widget thumbnail;
+    if (pedal.thumbnailPath != null && File(pedal.thumbnailPath!).existsSync()) {
+      thumbnail = Image.file(
+        File(pedal.thumbnailPath!),
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+      );
+    } else {
+      thumbnail = Container(
+        width: 48,
+        height: 48,
+        color: Colors.grey.shade300,
+        child: const Icon(Icons.extension),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: widget.onBack,
+          ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: thumbnail,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  pedal.label ?? pedal.instanceName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (pedal.brand != null)
+                  Text(
+                    pedal.brand!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _savePedalboard,
+            tooltip: 'Save pedalboard',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParameterTile(ControlPort port) {
+    if (port.isToggled) {
+      return _buildToggleParameter(port);
+    } else if (port.isTrigger) {
+      return _buildTriggerParameter(port);
+    } else {
+      return _buildSliderParameter(port);
+    }
+  }
+
+  Widget _buildSliderParameter(ControlPort port) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(port.name, style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                port.isInteger
+                    ? port.currentValue.round().toString()
+                    : port.currentValue.toStringAsFixed(2),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          Slider(
+            value: port.currentValue.clamp(port.minimum, port.maximum),
+            min: port.minimum,
+            max: port.maximum,
+            divisions: port.isInteger
+                ? (port.maximum - port.minimum).round()
+                : null,
+            onChanged: (value) {
+              setState(() {
+                port.currentValue = port.isInteger ? value.roundToDouble() : value;
+              });
+            },
+            onChangeEnd: (value) {
+              _sendParameterChange(port.symbol, value);
+            },
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                port.isInteger
+                    ? port.minimum.round().toString()
+                    : port.minimum.toStringAsFixed(1),
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              Text(
+                port.isInteger
+                    ? port.maximum.round().toString()
+                    : port.maximum.toStringAsFixed(1),
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleParameter(ControlPort port) {
+    final isOn = port.currentValue >= 0.5;
+
+    return SwitchListTile(
+      title: Text(port.name),
+      value: isOn,
+      onChanged: (value) {
+        setState(() {
+          port.currentValue = value ? 1.0 : 0.0;
+        });
+        _sendParameterChange(port.symbol, port.currentValue);
+      },
+    );
+  }
+
+  Widget _buildTriggerParameter(ControlPort port) {
+    return ListTile(
+      title: Text(port.name),
+      trailing: ElevatedButton(
+        onPressed: () {
+          _sendParameterChange(port.symbol, 1.0);
+          // Triggers reset to 0 after being triggered
+          Future.delayed(const Duration(milliseconds: 100), () {
+            _sendParameterChange(port.symbol, 0.0);
+          });
+        },
+        child: const Text('Trigger'),
+      ),
+    );
+  }
+
+  void _sendParameterChange(String portSymbol, double value) {
+    final pedal = widget.pedal;
+    // The instance name might have angle brackets, remove them
+    var instance = pedal.instanceName;
+    if (instance.startsWith('<')) {
+      instance = instance.substring(1);
+    }
+    if (instance.endsWith('>')) {
+      instance = instance.substring(0, instance.length - 1);
+    }
+
+    _log.info('Setting parameter: $instance/$portSymbol = $value');
+
+    final hmiServer = widget.hmiServer;
+    if (hmiServer != null) {
+      hmiServer.setParameter(instance, portSymbol, value);
+    } else {
+      _log.warning('No HMI server available to send parameter change');
+    }
+  }
+}
