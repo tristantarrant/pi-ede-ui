@@ -205,6 +205,13 @@ class HMIServer {
     log.fine("Broadcast: $command");
   }
 
+  /// Request mod-ui to load a pedalboard
+  void loadPedalboard(int pedalboardIndex, {int bankId = 1}) {
+    final command = '${HMIProtocol.CMD_PEDALBOARD_LOAD} $bankId $pedalboardIndex';
+    log.info("Requesting pedalboard load: bankId=$bankId, index=$pedalboardIndex");
+    broadcast(command);
+  }
+
   void dispose() {
     _pedalboardChangeController.close();
     _pedalboardLoadController.close();

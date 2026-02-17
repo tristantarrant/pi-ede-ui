@@ -92,17 +92,21 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
 
   void _left() {
     if (activePedalboard > 0) {
+      final newIndex = activePedalboard - 1;
       setState(() {
-        activePedalboard--;
+        activePedalboard = newIndex;
       });
+      widget.hmiServer?.loadPedalboard(newIndex);
     }
   }
 
   void _right() {
     if (activePedalboard < pedalboards.length - 1) {
+      final newIndex = activePedalboard + 1;
       setState(() {
-        activePedalboard++;
+        activePedalboard = newIndex;
       });
+      widget.hmiServer?.loadPedalboard(newIndex);
     }
   }
 
