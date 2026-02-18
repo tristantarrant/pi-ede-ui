@@ -4,10 +4,10 @@ import 'dart:io' show File;
 import 'package:http/http.dart' as http;
 import 'package:universal_io/io.dart' show Platform;
 
-import 'namespace.dart';
+import './namespace.dart';
 import './term.dart';
-import 'triple.dart';
-import 'constants.dart';
+import './triple.dart';
+import './constants.dart';
 import '../parser/grammar_parser.dart';
 
 class Graph {
@@ -770,12 +770,23 @@ class Graph {
   /// Parsed triples are saved in the list and in the form of
   /// [[sub, [pre1, [obj1, obj2, ...]], [pre2, [obj3, ...]], ...], .]
   /// so the first item is a list of triple content, and the second is just .
+  ///
+  /// For blank node subjects (blankNodePropertyList predicateObjectList?):
+  /// [[[blankNodePropertyList], [optionalPredicateObjectList]], .]
   void _saveToGroups(List tripleList) {
     // Skips namespace prefixes as they are handled by [Graph._saveToContext]
     if (tripleList[0] == '@prefix' || tripleList[0] == '@base') {
       return;
     }
     List tripleContent = tripleList[0];
+
+    // Check if this is a blank node subject pattern
+    // Structure: [[blankNodePropertyList], [optionalPredicateObjectList]]
+    if (_isBlankNodeSubjectPattern(tripleContent)) {
+      _processBlankNodeSubjectTriple(tripleContent);
+      return;
+    }
+
     dynamic sub = item(tripleContent[0]);
     if (!groups.containsKey(sub)) {
       groups[sub] = Map();
@@ -787,35 +798,43 @@ class Graph {
       dynamic pre = item(predicateObjectList[0]);
       groups[sub]![pre] = Set();
       List objectList = predicateObjectList[1];
-
       for (var obj in objectList) {
-        var objItem;
-        if (obj is String) {
-          objItem = item(obj);
-        } else if (obj is List) {
-          objItem = itemFromList(obj);
-        }
-
-        groups[sub]![pre]!.add(objItem);
-        triples.add(Triple(sub: sub, pre: pre, obj: objItem));
-
-        /// Keep it for future use.
-
-        // for (var obj in objectList) {
-        //   var parsedObj =
-        //       (obj is List) ? item(_combineListItems(obj)) : item(obj);
-        //   groups[sub]![pre]!.add(parsedObj);
-        //   triples.add(Triple(sub: sub, pre: pre, obj: parsedObj));
-        // }
+        // Call item() directly - it now handles blank node property lists,
+        // anonymous blank nodes, and collections properly
+        var parsedObj = item(obj);
+        groups[sub]![pre]!.add(parsedObj);
+        triples.add(Triple(sub: sub, pre: pre, obj: parsedObj));
       }
+    }
+  }
 
-      /// Keep it for future use.
+  /// Checks if tripleContent represents a blank node subject pattern
+  /// Structure: [[, predicateObjectLists, ], [followingPredicateObjectLists]]
+  bool _isBlankNodeSubjectPattern(List tripleContent) {
+    if (tripleContent.length != 2) return false;
+    // First element should be a blankNodePropertyList: [, predicateObjectLists, ]
+    if (tripleContent[0] is! List) return false;
+    List firstElement = tripleContent[0] as List;
+    // Check for blank node property list structure: [, content, ]
+    if (firstElement.length == 3 && firstElement[0] == '[' && firstElement[2] == ']') {
+      return true;
+    }
+    return false;
+  }
 
-      // // Original for loop - TODO remove
-      // for (String obj in objectList) {
-      //   groups[sub]![pre]!.add(item(obj));
-      //   triples.add(Triple(sub: sub, pre: pre, obj: item(obj)));
-      // }
+  /// Processes a triple where the subject is a blank node property list
+  void _processBlankNodeSubjectTriple(List tripleContent) {
+    // tripleContent[0] is [, predicateObjectLists, ] (the blankNodePropertyList)
+    // tripleContent[1] is [[predicateObjectList]] (optional following predicates)
+    List blankNodeList = tripleContent[0] as List;
+    BNode sub = _processBlankNodePropertyList(blankNodeList);
+
+    // Process the optional following predicateObjectLists
+    if (tripleContent.length > 1 && tripleContent[1] is List) {
+      List followingPOLists = tripleContent[1] as List;
+      if (followingPOLists.isNotEmpty && followingPOLists[0] is List) {
+        _processPredicateObjectListsForSubject(sub, followingPOLists[0] as List);
+      }
     }
   }
 
@@ -878,11 +897,16 @@ class Graph {
         int firstColonPos = s.indexOf(':');
         String namespace = s.substring(0, firstColonPos + 1); // including ':'
         String localname = s.substring(firstColonPos + 1);
-        // If the namespace is not defined, we can't proceed.
+        // A valid namespace cannot contain spaces. If it does, this is likely
+        // a literal string value that happens to contain a colon.
+        if (namespace.contains(' ') || namespace.contains('\n') ||
+            namespace.contains('\t')) {
+          return Literal(s);
+        }
+        // If the namespace is not defined, treat as a literal
+        // (it might be a string value containing a colon)
         if (ctx[namespace] == null) {
-          throw Exception(
-              'Namespace ${namespace.substring(0, namespace.length - 1)} is used '
-              'but not defined. (caused by $s)');
+          return Literal(s);
         }
         return URIRef('${ctx[namespace]?.value}$localname');
       }
@@ -908,7 +932,19 @@ class Graph {
         return Literal(s);
       }
     } else if (s is List) {
-      // Combine all items and sub-items in the list into a single string.
+      // Check if this is a blank node property list: [[, predicateObjectLists, ]
+      if (_isBlankNodePropertyList(s)) {
+        return _processBlankNodePropertyList(s);
+      }
+      // Check if this is an anonymous blank node: [[, [], ]
+      if (_isAnonymousBlankNode(s)) {
+        return BNode();
+      }
+      // Check if this is an RDF collection: [(, objects, )
+      if (_isCollection(s)) {
+        return _processCollection(s);
+      }
+      // Otherwise combine all items into a single string.
       String combinedString = _combineListItems(s);
       if (combinedString.startsWith('_:')) {
         return BNode(combinedString);
@@ -917,120 +953,145 @@ class Graph {
     }
   }
 
-  List stripBrackets(List values) {
-    if (values[0] == '(' || values[0] == '[') {
-      values = values.sublist(1, values.length - 1);
+  /// Checks if a list represents a blank node property list: [ predicateObjectList ]
+  bool _isBlankNodePropertyList(List s) {
+    if (s.length == 3 && s[0] == '[' && s[2] == ']') {
+      // s[1] should be the predicateObjectList (a non-empty list)
+      return s[1] is List && (s[1] as List).isNotEmpty;
     }
-    return values;
+    // Also handle nested structure from EvaluatorDefinition
+    if (s.length == 1 && s[0] is List) {
+      return _isBlankNodePropertyList(s[0] as List);
+    }
+    return false;
   }
 
-  Set parseObjectValues(List objVals) {
-    /// Parses a Set or List of multiple object values
-    objVals = stripBrackets(objVals)[0];
-
-    Set values = {};
-    for (var objVal in objVals) {
-      if (objVal is List) {
-        objVal = stripBrackets(objVal)[0][0];
-
-        String objName = objVal[0];
-        List subValues = objVal[1];
-
-        // TODO try to parse to int/float etc
-        Map objMap = {
-          item(objName): subValues.length == 1
-              ? item(subValues[0])
-              : subValues.map((e) => item(e)).toSet()
-        };
-        values.add(objMap);
-      } else {
-        // TODO
-        values.add(objVal);
-      }
+  /// Checks if a list represents an anonymous blank node: []
+  bool _isAnonymousBlankNode(List s) {
+    if (s.length == 3 && s[0] == '[' && s[2] == ']') {
+      return s[1] is List && (s[1] as List).isEmpty;
     }
-    return values;
+    // Also handle nested structure
+    if (s.length == 1 && s[0] is List) {
+      return _isAnonymousBlankNode(s[0] as List);
+    }
+    return false;
   }
 
-  List parseObjectValueFromNameStringAndValueList(List obj) {
-    /// Used for getting name and values for objects when obj is in the format:
-    /// ['Object name string', ['Value 1', 'Value 2 (optional)'...] ]
-    /// Returns in format: {'Object name string': {'Value 1', 'Value 2 (optional)'...} }
-
-    String objName = obj[0];
-
-    List values = obj[1];
-    Set objValues = {};
-
-    if (values.length == 1) {
-      objValues.add(values[0]);
-    } else {
-      // TODO parse multiple values
-      // List singleValuesList = values[1];
-      for (final val in values) {
-        // check whether string or list
-        if (val is String) {
-          objValues.add(val);
-        } else {
-          // TODO
-          throw UnimplementedError(
-              'Parsing of multiple values is not yet implemented in this method');
-        }
-      }
+  /// Checks if a list represents an RDF collection: ( objects )
+  bool _isCollection(List s) {
+    if (s.length >= 2 && s[0] == '(' && s[s.length - 1] == ')') {
+      return true;
     }
-
-    return [objName, objValues];
+    if (s.length == 1 && s[0] is List) {
+      return _isCollection(s[0] as List);
+    }
+    return false;
   }
 
-  parseObjectValue() {
-    /// Parses a single object value
+  /// Processes a blank node property list and returns the BNode.
+  /// Creates triples for all predicateObjectLists within the blank node.
+  BNode _processBlankNodePropertyList(List s) {
+    // Unwrap nested lists if needed
+    while (s.length == 1 && s[0] is List) {
+      s = s[0] as List;
+    }
+
+    // Structure: [[, predicateObjectLists, ]
+    BNode bnode = BNode();
+
+    if (s.length == 3 && s[0] == '[' && s[2] == ']') {
+      List predicateObjectLists = s[1] as List;
+      _processPredicateObjectListsForSubject(bnode, predicateObjectLists);
+    }
+
+    return bnode;
   }
 
-  Map<URIRef, Set<dynamic>> itemFromList(List tripleList) {
-    List predicateObjectLists = [];
-    Map<URIRef, Set<dynamic>> objectGroups = Map();
+  /// Processes predicateObjectLists for a given subject, creating triples.
+  void _processPredicateObjectListsForSubject(
+      dynamic sub, List predicateObjectLists) {
+    for (var predicateObjectList in predicateObjectLists) {
+      if (predicateObjectList is! List || predicateObjectList.length < 2) {
+        continue;
+      }
+      // predicateObjectList is [predicate, objectList]
+      dynamic pre = item(predicateObjectList[0]);
+      if (!groups.containsKey(sub)) {
+        groups[sub] = Map();
+      }
+      groups[sub]![pre] = Set();
 
-    if (tripleList[0] == '(') {
-      if (tripleList[1][0] is List) {
-        tripleList = tripleList[1][0];
+      List objectList = predicateObjectList[1] as List;
+      for (var obj in objectList) {
+        var parsedObj = item(obj);
+        groups[sub]![pre]!.add(parsedObj);
+        triples.add(Triple(sub: sub, pre: pre, obj: parsedObj));
       }
     }
+  }
 
-    if (tripleList[0] == '[') {
-      // trim leading and trailing 'entries' that are just [ or ]
-      tripleList = tripleList.sublist(1, tripleList.length - 1);
-      predicateObjectLists = tripleList[0];
+  /// Processes an RDF collection and returns a representation.
+  /// For now, we'll return a BNode that represents the list head.
+  dynamic _processCollection(List s) {
+    // Unwrap nested lists if needed
+    while (s.length == 1 && s[0] is List) {
+      s = s[0] as List;
     }
 
-    for (List predicateObjectList in predicateObjectLists) {
-      if (predicateObjectList[0] == '[') {
-        predicateObjectList =
-            predicateObjectList.sublist(1, predicateObjectList.length - 1);
-      }
-      var pre;
-      pre = item(predicateObjectList[0]);
-      var objValues = predicateObjectList[1];
-
-      if (predicateObjectList[0] is List) {
-        // detect list within predicateObjectList and iterate
-        pre = itemFromList(predicateObjectList[0]);
-      } else {
-        pre = item(predicateObjectList[0]); // URIRef
-      }
-
-      Set objItem = {};
-
-      for (final obj in objValues) {
-        if (objValues[0] is List && objValues[0].length > 1) {
-          // Multiple object values found (e.g. multiple restrictions on a ConstrainedDatatype)
-          objItem.add(parseObjectValues(objValues[0]));
-        } else {
-          objItem.add(item(obj));
-        }
-      }
-
-      objectGroups[pre] = objItem;
+    // Structure: [(, object1, object2, ..., )
+    // For empty collection (), return rdf:nil
+    if (s.length == 2 && s[0] == '(' && s[1] == ')') {
+      return URIRef('http://www.w3.org/1999/02/22-rdf-syntax-ns#nil');
     }
-    return objectGroups;
+
+    // Get the objects (everything between ( and ))
+    List objects = [];
+    for (int i = 1; i < s.length - 1; i++) {
+      objects.add(s[i]);
+    }
+
+    if (objects.isEmpty) {
+      return URIRef('http://www.w3.org/1999/02/22-rdf-syntax-ns#nil');
+    }
+
+    // Create linked list structure with BNodes
+    BNode? firstNode;
+    BNode? currentNode;
+    URIRef rdfFirst = URIRef('http://www.w3.org/1999/02/22-rdf-syntax-ns#first');
+    URIRef rdfRest = URIRef('http://www.w3.org/1999/02/22-rdf-syntax-ns#rest');
+    URIRef rdfNil = URIRef('http://www.w3.org/1999/02/22-rdf-syntax-ns#nil');
+
+    for (int i = 0; i < objects.length; i++) {
+      BNode node = BNode();
+      if (firstNode == null) {
+        firstNode = node;
+      }
+
+      // Add rdf:first triple
+      var objValue = item(objects[i]);
+      if (!groups.containsKey(node)) {
+        groups[node] = Map();
+      }
+      groups[node]![rdfFirst] = {objValue};
+      triples.add(Triple(sub: node, pre: rdfFirst, obj: objValue));
+
+      // Link previous node to this one
+      if (currentNode != null) {
+        groups[currentNode]![rdfRest] = {node};
+        triples.add(Triple(sub: currentNode, pre: rdfRest, obj: node));
+      }
+
+      currentNode = node;
+    }
+
+    // Last node's rdf:rest is rdf:nil
+    if (currentNode != null) {
+      groups[currentNode]![rdfRest] = {rdfNil};
+      triples.add(Triple(sub: currentNode, pre: rdfRest, obj: rdfNil));
+    }
+
+    return firstNode ?? rdfNil;
   }
 
   /// Serializes the graph to certain format and export to file.

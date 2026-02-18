@@ -46,8 +46,9 @@ class ExpressionDefinition extends GrammarDefinition {
           .repeat(0, 1);
 
   // [139s] 	PNAME_NS 	::= 	PN_PREFIX? ':'
-  // trim at the end cause there might be spaces between prefix and colon
-  Parser PNAME_NS() => ref0(PN_PREFIX).repeat(0, 1) & string(':').trim();
+  // Note: No whitespace is allowed between prefix and colon per W3C Turtle spec.
+  // Whitespace handling should be done at higher levels (prefixID, etc.)
+  Parser PNAME_NS() => ref0(PN_PREFIX).repeat(0, 1) & string(':');
 
   // [170s] 	PERCENT 	::= 	'%' HEX HEX
   Parser PERCENT() => string('%') & ref0(HEX).times(2);
@@ -210,8 +211,10 @@ class ExpressionDefinition extends GrammarDefinition {
           .trim();
 
   // [8] 	objectList 	::= 	object (',' object)*
+  // Note: Removed trailing .trim() to prevent whitespace consumption issues
+  // when objectList contains blank node property lists
   Parser objectList() =>
-      ref0(object) & (string(',').trim() & ref0(object)).star().trim();
+      ref0(object) & (string(',').trim() & ref0(object)).star();
 
   // [14] 	blankNodePropertyList 	::= 	'[' predicateObjectList ']'
   Parser blankNodePropertyList() =>
@@ -257,7 +260,7 @@ class ExpressionDefinition extends GrammarDefinition {
   Parser turtleDoc() => ref0(statement).star();
 }
 
-/// This class focuses on interpreting and formatting the raw parsed data
+/// This class focuses on interpreting and formatting the raw parsed data 
 /// into a more structured and meaningful format.
 
 class EvaluatorDefinition extends ExpressionDefinition {
@@ -331,14 +334,22 @@ class EvaluatorDefinition extends ExpressionDefinition {
       });
 
   // extract predicateObjectList =>
+  // Structure: verb objectList (';' (verb objectList)?)*
+  // values[0] = first verb, values[1] = first objectList
+  // values[2] = list of (';' (verb objectList)?)
   Parser predicateObjectList() => super.predicateObjectList().map((values) {
         final rtnList = [];
         final firstPreObj = [values[0], values[1]];
         rtnList.add(firstPreObj);
         final restPreObjs = values[2] as List;
         for (var i = 0; i < restPreObjs.length; i++) {
-          var o = restPreObjs[i][1] as List;
-          if (o.length > 0) rtnList.add(o[0]);
+          // restPreObjs[i] is [';', (verb objectList)?]
+          // restPreObjs[i][1] is the optional part, which can be empty
+          final optionalPart = restPreObjs[i][1] as List;
+          if (optionalPart.isNotEmpty) {
+            // optionalPart[0] is [verb, objectList]
+            rtnList.add(optionalPart[0]);
+          }
         }
         return rtnList;
       });

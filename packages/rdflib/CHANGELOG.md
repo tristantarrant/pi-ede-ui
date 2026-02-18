@@ -1,7 +1,3 @@
-## 0.2.12
-
-- Fix parsing of semicolon at end of predicateObjectLis
-
 ## 0.2.11
 
 - Fix multi-line parse issue
