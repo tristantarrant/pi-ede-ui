@@ -267,12 +267,36 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
                   ),
                 ))
           ])
-        : Image.asset(
-            'assets/pedalboard.png',
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
-          );
+        : Stack(children: [
+            Image.asset(
+              'assets/pedalboard.png',
+              width: double.infinity,
+              height: double.infinity,
+              fit: BoxFit.cover,
+            ),
+            Center(
+                child: Text(
+                  pedalboard.name,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 50,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black,
+                        offset: Offset(5.0, 5.0),
+                        blurRadius: 10.0,
+                      ),
+                      Shadow(
+                        color: Colors.blue.shade200,
+                        offset: Offset(-5.0, -5.0),
+                        blurRadius: 8.0,
+                      ),
+                    ],
+                  ),
+                ))
+          ]);
   }
 
   Widget _buildPedalboardView() {
