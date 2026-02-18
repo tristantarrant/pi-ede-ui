@@ -95,12 +95,16 @@ class Pedalboard {
           }
         }
 
+        // Extract file parameter values from LV2 state
+        final fileValues = _readFileParamState(instanceNumber);
+
         _pedals!.add(Pedal(
           instanceName: instanceName,
           pluginUri: pluginUri,
           instanceNumber: instanceNumber,
           enabled: enabled,
           portValues: portValues,
+          fileValues: fileValues,
         ));
       }
 
@@ -119,5 +123,30 @@ class Pedalboard {
     }
 
     return _pedals!;
+  }
+
+  /// Read file parameter values from the LV2 state directory for a plugin instance.
+  /// State files are stored in effect-{instanceNumber}/effect.ttl within the
+  /// pedalboard bundle, containing entries like `<param_uri> "path"` .
+  Map<String, String> _readFileParamState(int instanceNumber) {
+    final fileValues = <String, String>{};
+    final effectTtl = File('$path/effect-$instanceNumber/effect.ttl');
+    if (!effectTtl.existsSync()) return fileValues;
+
+    try {
+      final content = effectTtl.readAsStringSync();
+      final pattern = RegExp(r'<([^>]+)>\s+"([^"]*)"');
+      for (final match in pattern.allMatches(content)) {
+        final paramUri = match.group(1)!;
+        final value = match.group(2)!;
+        if (value.isNotEmpty && value != 'None' && value.contains('/')) {
+          fileValues[paramUri] = value;
+        }
+      }
+    } catch (e) {
+      _log.fine('Could not read state for effect-$instanceNumber: $e');
+    }
+
+    return fileValues;
   }
 }
