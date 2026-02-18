@@ -25,6 +25,13 @@ class PedalEditorWidget extends StatefulWidget {
 }
 
 class _PedalEditorWidgetState extends State<PedalEditorWidget> {
+  String? _selectedPortSymbol;
+
+  void _selectPort(String? symbol) {
+    setState(() {
+      _selectedPortSymbol = _selectedPortSymbol == symbol ? null : symbol;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -199,6 +206,7 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
         onChanged: (value) {
           if (value != null) {
             setState(() {
+              _selectedPortSymbol = null;
               port.currentValue = value;
             });
             _sendParameterChange(port.symbol, value);
@@ -209,57 +217,71 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
   }
 
   Widget _buildSliderParameter(ControlPort port) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(port.name, style: Theme.of(context).textTheme.bodyMedium),
-              Text(
-                port.isInteger
-                    ? port.currentValue.round().toString()
-                    : port.currentValue.toStringAsFixed(2),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-          Slider(
-            value: port.currentValue.clamp(port.minimum, port.maximum),
-            min: port.minimum,
-            max: port.maximum,
-            divisions: port.isInteger
-                ? (port.maximum - port.minimum).round()
-                : null,
-            onChanged: (value) {
-              setState(() {
-                port.currentValue = port.isInteger ? value.roundToDouble() : value;
-              });
-            },
-            onChangeEnd: (value) {
-              _sendParameterChange(port.symbol, value);
-            },
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                port.isInteger
-                    ? port.minimum.round().toString()
-                    : port.minimum.toStringAsFixed(1),
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-              Text(
-                port.isInteger
-                    ? port.maximum.round().toString()
-                    : port.maximum.toStringAsFixed(1),
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-        ],
+    final isSelected = _selectedPortSymbol == port.symbol;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _selectPort(port.symbol),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: isSelected
+            ? Theme.of(context).primaryColor.withValues(alpha: 0.08)
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(port.name, style: Theme.of(context).textTheme.bodyMedium),
+                Text(
+                  port.isInteger
+                      ? port.currentValue.round().toString()
+                      : port.currentValue.toStringAsFixed(2),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            Slider(
+              value: port.currentValue.clamp(port.minimum, port.maximum),
+              min: port.minimum,
+              max: port.maximum,
+              divisions: port.isInteger
+                  ? (port.maximum - port.minimum).round()
+                  : null,
+              onChanged: isSelected
+                  ? (value) {
+                      setState(() {
+                        port.currentValue =
+                            port.isInteger ? value.roundToDouble() : value;
+                      });
+                    }
+                  : null,
+              onChangeEnd: isSelected
+                  ? (value) {
+                      _sendParameterChange(port.symbol, value);
+                    }
+                  : null,
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  port.isInteger
+                      ? port.minimum.round().toString()
+                      : port.minimum.toStringAsFixed(1),
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+                Text(
+                  port.isInteger
+                      ? port.maximum.round().toString()
+                      : port.maximum.toStringAsFixed(1),
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -272,6 +294,7 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
       value: isOn,
       onChanged: (value) {
         setState(() {
+          _selectedPortSymbol = null;
           port.currentValue = value ? 1.0 : 0.0;
         });
         _sendParameterChange(port.symbol, port.currentValue);
@@ -284,6 +307,7 @@ class _PedalEditorWidgetState extends State<PedalEditorWidget> {
       title: Text(port.name),
       trailing: ElevatedButton(
         onPressed: () {
+          setState(() { _selectedPortSymbol = null; });
           _sendParameterChange(port.symbol, 1.0);
           // Triggers reset to 0 after being triggered
           Future.delayed(const Duration(milliseconds: 100), () {
