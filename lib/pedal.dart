@@ -409,77 +409,124 @@ class LV2PluginCache {
     return index;
   }
 
-  /// Load a single plugin's full info (for use in isolate)
+  /// Load a single plugin's full info (for use in isolate).
+  /// Each file is parsed at most once for performance on ARM hardware.
   static LV2PluginInfo? _loadPluginSync(String uri, String bundlePath) {
     String? label;
     String? brand;
     String? thumbnailPath;
 
-    // First try to get label/brand/thumbnail from modgui.ttl or modguis.ttl
-    final modguiFile = File('$bundlePath/modgui.ttl');
-    final modguisFile = File('$bundlePath/modguis.ttl');
+    // Parse manifest.ttl once (reused for TTL file lookup, modgui, file params)
+    Graph? manifestGraph;
+    final manifestFile = File('$bundlePath/manifest.ttl');
+    if (manifestFile.existsSync()) {
+      try {
+        manifestGraph = Graph();
+        manifestGraph.parseTurtle(manifestFile.readAsStringSync());
+      } catch (e) {
+        manifestGraph = null;
+      }
+    }
 
+    // Find plugin TTL files from manifest graph (without re-parsing manifest)
+    final pluginTtlFiles = <File>[];
+    if (manifestGraph != null) {
+      final seeAlsoTriples = manifestGraph.triples.where((t) =>
+          t.sub.value == uri &&
+          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#seeAlso');
+      for (final seeAlso in seeAlsoTriples) {
+        final ref = seeAlso.obj;
+        if (ref is URIRef && !ref.value.contains('modgui')) {
+          pluginTtlFiles.add(File('$bundlePath/${ref.value}'));
+        }
+      }
+    }
+
+    // Parse plugin TTL files once into a single graph
+    final pluginGraph = Graph();
+    for (final ttlFile in pluginTtlFiles) {
+      if (ttlFile.existsSync()) {
+        try {
+          pluginGraph.parseTurtle(ttlFile.readAsStringSync());
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    // Try modgui.ttl first
+    final modguiFile = File('$bundlePath/modgui.ttl');
     if (modguiFile.existsSync()) {
-      final content = modguiFile.readAsStringSync();
-      _extractModguiData(content, bundlePath, (l, b, t) {
-        label = l;
-        brand = b;
-        thumbnailPath = t;
-      }, uri: uri);
+      try {
+        final g = Graph();
+        g.parseTurtle(modguiFile.readAsStringSync());
+        _extractModguiDataFromGraph(g, bundlePath, (l, b, t) {
+          label = l;
+          brand = b;
+          thumbnailPath = t;
+        }, uri: uri);
+      } catch (e) {
+        // modgui.ttl parse failed
+      }
     }
 
     // Check modguis.ttl (plural) for multi-plugin bundles like rkr.lv2
-    if ((label == null || thumbnailPath == null) && modguisFile.existsSync()) {
-      final content = modguisFile.readAsStringSync();
-      _extractModguiData(content, bundlePath, (l, b, t) {
+    if (label == null || thumbnailPath == null) {
+      final modguisFile = File('$bundlePath/modguis.ttl');
+      if (modguisFile.existsSync()) {
+        try {
+          final g = Graph();
+          g.parseTurtle(modguisFile.readAsStringSync());
+          _extractModguiDataFromGraph(g, bundlePath, (l, b, t) {
+            label ??= l;
+            brand ??= b;
+            thumbnailPath ??= t;
+          }, uri: uri);
+        } catch (e) {
+          // modguis.ttl parse failed
+        }
+      }
+    }
+
+    // If missing data, check plugin TTL (already parsed into pluginGraph)
+    if (label == null || thumbnailPath == null) {
+      _extractModguiDataFromGraph(pluginGraph, bundlePath, (l, b, t) {
         label ??= l;
         brand ??= b;
         thumbnailPath ??= t;
       }, uri: uri);
     }
 
-    // If missing data, also check main plugin TTL files (some plugins embed modgui there)
-    if (label == null || thumbnailPath == null) {
-      final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
-      for (final ttlFile in ttlFiles) {
-        if (ttlFile.existsSync()) {
-          final content = ttlFile.readAsStringSync();
-          _extractModguiData(content, bundlePath, (l, b, t) {
-            label ??= l;
-            brand ??= b;
-            thumbnailPath ??= t;
-          }, uri: uri);
-          if (label != null && thumbnailPath != null) break;
+    // Some bundles (e.g., midifilter.lv2) put modgui data in manifest.ttl
+    if ((label == null || thumbnailPath == null) && manifestGraph != null) {
+      _extractModguiDataFromGraph(manifestGraph, bundlePath, (l, b, t) {
+        label ??= l;
+        brand ??= b;
+        thumbnailPath ??= t;
+      }, uri: uri);
+    }
+
+    // If no label from modgui, try doap:name from the plugin graph
+    if (label == null) {
+      final nameTriples = pluginGraph.triples.where((t) =>
+          t.sub.value == uri &&
+          t.pre.value == 'http://usefulinc.com/ns/doap#name');
+      if (nameTriples.isNotEmpty) {
+        final nameObj = nameTriples.first.obj;
+        if (nameObj is Literal) {
+          label = nameObj.value;
         }
       }
-    }
-
-    // Some bundles (e.g., midifilter.lv2) put modgui data in manifest.ttl
-    if (label == null || thumbnailPath == null) {
-      final manifestFile = File('$bundlePath/manifest.ttl');
-      if (manifestFile.existsSync()) {
-        final content = manifestFile.readAsStringSync();
-        _extractModguiData(content, bundlePath, (l, b, t) {
-          label ??= l;
-          brand ??= b;
-          thumbnailPath ??= t;
-        }, uri: uri);
-      }
-    }
-
-    // If no label from modgui, try doap:name from the main plugin TTL
-    if (label == null) {
-      label = _getDoapNameFromPluginTtl(uri, bundlePath);
     }
 
     // Final fallback: extract from URI
     label ??= uri.split('/').last.split('#').last;
 
-    // Load control ports
-    final controlPorts = _loadControlPortsSync(uri, bundlePath);
+    // Extract control ports from pre-parsed plugin graph
+    final controlPorts = _extractControlPorts(pluginGraph);
 
-    // Load file parameters
-    final fileParameters = _loadFileParametersSync(uri, bundlePath);
+    // Extract file parameters from pre-parsed graphs
+    final fileParameters = _extractFileParameters(pluginGraph, manifestGraph);
 
     return LV2PluginInfo(
       uri: uri,
@@ -492,10 +539,10 @@ class LV2PluginCache {
     );
   }
 
-  /// Extract modgui data (label, brand, thumbnail) from TTL content using rdflib
-  /// If uri is provided, only extract data for that specific plugin URI
-  static void _extractModguiData(
-    String content,
+  /// Extract modgui data (label, brand, thumbnail) from a pre-parsed graph.
+  /// If uri is provided, only extract data for that specific plugin URI.
+  static void _extractModguiDataFromGraph(
+    Graph g,
     String bundlePath,
     void Function(String? label, String? brand, String? thumbnailPath) onData,
     {String? uri}
@@ -504,304 +551,191 @@ class LV2PluginCache {
     String? brand;
     String? thumbnailPath;
 
-    try {
-      final g = Graph();
-      g.parseTurtle(content);
+    if (uri != null) {
+      // Find the gui blank node for this specific plugin URI
+      final guiTriples = g.triples.where((t) =>
+          t.sub.value == uri &&
+          t.pre.value == 'http://moddevices.com/ns/modgui#gui');
 
-      if (uri != null) {
-        // Find the gui blank node for this specific plugin URI
-        final guiTriples = g.triples.where((t) =>
-            t.sub.value == uri &&
-            t.pre.value == 'http://moddevices.com/ns/modgui#gui');
+      if (guiTriples.isNotEmpty) {
+        final guiNode = guiTriples.first.obj;
 
-        if (guiTriples.isNotEmpty) {
-          final guiNode = guiTriples.first.obj;
-
-          final labelTriples = g.triples.where((t) =>
-              t.sub == guiNode &&
-              t.pre.value == 'http://moddevices.com/ns/modgui#label');
-          if (labelTriples.isNotEmpty && labelTriples.first.obj is Literal) {
-            label = (labelTriples.first.obj as Literal).value;
-          }
-
-          final brandTriples = g.triples.where((t) =>
-              t.sub == guiNode &&
-              t.pre.value == 'http://moddevices.com/ns/modgui#brand');
-          if (brandTriples.isNotEmpty && brandTriples.first.obj is Literal) {
-            brand = (brandTriples.first.obj as Literal).value;
-          }
-
-          final thumbTriples = g.triples.where((t) =>
-              t.sub == guiNode &&
-              t.pre.value == 'http://moddevices.com/ns/modgui#thumbnail');
-          if (thumbTriples.isNotEmpty) {
-            thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
-          }
-        }
-      } else {
-        // No specific URI - extract from any modgui properties
         final labelTriples = g.triples.where((t) =>
+            t.sub == guiNode &&
             t.pre.value == 'http://moddevices.com/ns/modgui#label');
         if (labelTriples.isNotEmpty && labelTriples.first.obj is Literal) {
           label = (labelTriples.first.obj as Literal).value;
         }
 
         final brandTriples = g.triples.where((t) =>
+            t.sub == guiNode &&
             t.pre.value == 'http://moddevices.com/ns/modgui#brand');
         if (brandTriples.isNotEmpty && brandTriples.first.obj is Literal) {
           brand = (brandTriples.first.obj as Literal).value;
         }
 
         final thumbTriples = g.triples.where((t) =>
+            t.sub == guiNode &&
             t.pre.value == 'http://moddevices.com/ns/modgui#thumbnail');
         if (thumbTriples.isNotEmpty) {
           thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
         }
       }
-    } catch (e) {
-      // Some TTL files may be malformed
+    } else {
+      // No specific URI - extract from any modgui properties
+      final labelTriples = g.triples.where((t) =>
+          t.pre.value == 'http://moddevices.com/ns/modgui#label');
+      if (labelTriples.isNotEmpty && labelTriples.first.obj is Literal) {
+        label = (labelTriples.first.obj as Literal).value;
+      }
+
+      final brandTriples = g.triples.where((t) =>
+          t.pre.value == 'http://moddevices.com/ns/modgui#brand');
+      if (brandTriples.isNotEmpty && brandTriples.first.obj is Literal) {
+        brand = (brandTriples.first.obj as Literal).value;
+      }
+
+      final thumbTriples = g.triples.where((t) =>
+          t.pre.value == 'http://moddevices.com/ns/modgui#thumbnail');
+      if (thumbTriples.isNotEmpty) {
+        thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
+      }
     }
 
     onData(label, brand, thumbnailPath);
   }
 
-  /// Get list of plugin TTL files from manifest (excluding modgui.ttl)
-  static List<File> _getPluginTtlFiles(String uri, String bundlePath) {
-    final files = <File>[];
-    final manifestFile = File('$bundlePath/manifest.ttl');
-    if (!manifestFile.existsSync()) return files;
-
-    try {
-      final manifestGraph = Graph();
-      manifestGraph.parseTurtle(manifestFile.readAsStringSync());
-
-      // Find rdfs:seeAlso references for this plugin
-      final seeAlsoTriples = manifestGraph.triples.where((t) =>
-          t.sub.value == uri &&
-          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#seeAlso');
-
-      for (final seeAlso in seeAlsoTriples) {
-        final ref = seeAlso.obj;
-        if (ref is URIRef && !ref.value.contains('modgui')) {
-          files.add(File('$bundlePath/${ref.value}'));
-        }
-      }
-    } catch (e) {
-      // Skip problematic manifest files
-    }
-
-    return files;
-  }
-
-  /// Get doap:name from the main plugin TTL file
-  static String? _getDoapNameFromPluginTtl(String uri, String bundlePath) {
-    final manifestFile = File('$bundlePath/manifest.ttl');
-    if (!manifestFile.existsSync()) return null;
-
-    try {
-      final manifestGraph = Graph();
-      manifestGraph.parseTurtle(manifestFile.readAsStringSync());
-
-      // Find rdfs:seeAlso references for this plugin (excluding modgui.ttl)
-      final seeAlsoTriples = manifestGraph.triples.where((t) =>
-          t.sub.value == uri &&
-          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#seeAlso');
-
-      for (final seeAlso in seeAlsoTriples) {
-        final ref = seeAlso.obj;
-        if (ref is URIRef && !ref.value.contains('modgui')) {
-          final ttlPath = '$bundlePath/${ref.value}';
-          final ttlFile = File(ttlPath);
-          if (ttlFile.existsSync()) {
-            try {
-              final g = Graph();
-              g.parseTurtle(ttlFile.readAsStringSync());
-
-              // Find doap:name for this plugin URI
-              final nameTriples = g.triples.where((t) =>
-                  t.sub.value == uri &&
-                  t.pre.value == 'http://usefulinc.com/ns/doap#name');
-
-              if (nameTriples.isNotEmpty) {
-                final nameObj = nameTriples.first.obj;
-                if (nameObj is Literal) {
-                  return nameObj.value;
-                }
-              }
-            } catch (e) {
-              // Skip problematic TTL files
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Skip problematic manifest files
-    }
-
-    return null;
-  }
-
-  /// Load control ports synchronously using rdflib
-  static List<ControlPort> _loadControlPortsSync(String uri, String bundlePath) {
+  /// Extract control ports from a pre-parsed plugin graph
+  static List<ControlPort> _extractControlPorts(Graph g) {
     final ports = <ControlPort>[];
 
-    final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
-    for (final ttlFile in ttlFiles) {
-      if (!ttlFile.existsSync()) continue;
-      try {
-        final g = Graph();
-        g.parseTurtle(ttlFile.readAsStringSync());
+    // Find all nodes with rdf:type lv2:ControlPort
+    final controlPortNodes = g.triples.where((t) =>
+        t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+        t.obj.value == 'http://lv2plug.in/ns/lv2core#ControlPort'
+    ).map((t) => t.sub).toList();
 
-        // Find all nodes with rdf:type lv2:ControlPort
-        final controlPortNodes = g.triples.where((t) =>
-            t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
-            t.obj.value == 'http://lv2plug.in/ns/lv2core#ControlPort'
-        ).map((t) => t.sub).toList();
+    for (final node in controlPortNodes) {
+      // Extract symbol (required)
+      final symbolTriples = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#symbol');
+      if (symbolTriples.isEmpty) continue;
+      final symbol = (symbolTriples.first.obj as Literal).value;
 
-        for (final node in controlPortNodes) {
-          // Extract symbol (required)
-          final symbolTriples = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#symbol');
-          if (symbolTriples.isEmpty) continue;
-          final symbol = (symbolTriples.first.obj as Literal).value;
+      // Extract name
+      final nameTriples = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#name');
+      final name = nameTriples.isNotEmpty
+          ? (nameTriples.first.obj as Literal).value
+          : symbol;
 
-          // Extract name
-          final nameTriples = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#name');
-          final name = nameTriples.isNotEmpty
-              ? (nameTriples.first.obj as Literal).value
-              : symbol;
+      // Check if it's an output port
+      final isOutput = g.triples.any((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+          t.obj.value == 'http://lv2plug.in/ns/lv2core#OutputPort');
 
-          // Check if it's an output port
-          final isOutput = g.triples.any((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
-              t.obj.value == 'http://lv2plug.in/ns/lv2core#OutputPort');
+      // Extract min/max/default
+      final minTriples = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#minimum');
+      final maxTriples = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#maximum');
+      final defTriples = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#default');
 
-          // Extract min/max/default
-          final minTriples = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#minimum');
-          final maxTriples = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#maximum');
-          final defTriples = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#default');
+      final minimum = minTriples.isNotEmpty
+          ? double.tryParse((minTriples.first.obj as Literal).value) ?? 0
+          : 0.0;
+      final maximum = maxTriples.isNotEmpty
+          ? double.tryParse((maxTriples.first.obj as Literal).value) ?? 1
+          : 1.0;
+      final defaultValue = defTriples.isNotEmpty
+          ? double.tryParse((defTriples.first.obj as Literal).value) ?? 0
+          : 0.0;
 
-          final minimum = minTriples.isNotEmpty
-              ? double.tryParse((minTriples.first.obj as Literal).value) ?? 0
-              : 0.0;
-          final maximum = maxTriples.isNotEmpty
-              ? double.tryParse((maxTriples.first.obj as Literal).value) ?? 1
-              : 1.0;
-          final defaultValue = defTriples.isNotEmpty
-              ? double.tryParse((defTriples.first.obj as Literal).value) ?? 0
-              : 0.0;
+      // Check port properties
+      final portProperties = g.triples.where((t) =>
+          t.sub == node &&
+          t.pre.value == 'http://lv2plug.in/ns/lv2core#portProperty'
+      ).map((t) => t.obj.value).toSet();
 
-          // Check port properties
-          final portProperties = g.triples.where((t) =>
-              t.sub == node &&
-              t.pre.value == 'http://lv2plug.in/ns/lv2core#portProperty'
-          ).map((t) => t.obj.value).toSet();
+      final isToggled = portProperties.contains('http://lv2plug.in/ns/lv2core#toggled');
+      final isInteger = portProperties.contains('http://lv2plug.in/ns/lv2core#integer');
+      final isEnumeration = portProperties.contains('http://lv2plug.in/ns/lv2core#enumeration');
+      final isTrigger = portProperties.contains('http://lv2plug.in/ns/ext/port-props#trigger');
 
-          final isToggled = portProperties.contains('http://lv2plug.in/ns/lv2core#toggled');
-          final isInteger = portProperties.contains('http://lv2plug.in/ns/lv2core#integer');
-          final isEnumeration = portProperties.contains('http://lv2plug.in/ns/lv2core#enumeration');
-          final isTrigger = portProperties.contains('http://lv2plug.in/ns/ext/port-props#trigger');
+      // Parse scale points for enumeration ports
+      final scalePoints = <ScalePoint>[];
+      if (isEnumeration) {
+        final spTriples = g.triples.where((t) =>
+            t.sub == node &&
+            t.pre.value == 'http://lv2plug.in/ns/lv2core#scalePoint');
 
-          // Parse scale points for enumeration ports
-          final scalePoints = <ScalePoint>[];
-          if (isEnumeration) {
-            final spTriples = g.triples.where((t) =>
-                t.sub == node &&
-                t.pre.value == 'http://lv2plug.in/ns/lv2core#scalePoint');
+        for (final sp in spTriples) {
+          final spNode = sp.obj;
+          final spLabelTriples = g.triples.where((t) =>
+              t.sub == spNode &&
+              t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#label');
+          final spValueTriples = g.triples.where((t) =>
+              t.sub == spNode &&
+              t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#value');
 
-            for (final sp in spTriples) {
-              final spNode = sp.obj;
-              final spLabelTriples = g.triples.where((t) =>
-                  t.sub == spNode &&
-                  t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#label');
-              final spValueTriples = g.triples.where((t) =>
-                  t.sub == spNode &&
-                  t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#value');
-
-              if (spLabelTriples.isNotEmpty && spValueTriples.isNotEmpty) {
-                scalePoints.add(ScalePoint(
-                  label: (spLabelTriples.first.obj as Literal).value,
-                  value: double.tryParse(
-                      (spValueTriples.first.obj as Literal).value) ?? 0,
-                ));
-              }
-            }
-            scalePoints.sort((a, b) => a.value.compareTo(b.value));
+          if (spLabelTriples.isNotEmpty && spValueTriples.isNotEmpty) {
+            scalePoints.add(ScalePoint(
+              label: (spLabelTriples.first.obj as Literal).value,
+              value: double.tryParse(
+                  (spValueTriples.first.obj as Literal).value) ?? 0,
+            ));
           }
-
-          ports.add(ControlPort(
-            symbol: symbol,
-            name: name,
-            minimum: minimum,
-            maximum: maximum,
-            defaultValue: defaultValue,
-            isToggled: isToggled,
-            isInteger: isInteger,
-            isTrigger: isTrigger,
-            isOutput: isOutput,
-            isEnumeration: isEnumeration,
-            scalePoints: scalePoints,
-          ));
         }
-
-        if (ports.isNotEmpty) break;
-      } catch (e) {
-        // Skip problematic TTL files
+        scalePoints.sort((a, b) => a.value.compareTo(b.value));
       }
+
+      ports.add(ControlPort(
+        symbol: symbol,
+        name: name,
+        minimum: minimum,
+        maximum: maximum,
+        defaultValue: defaultValue,
+        isToggled: isToggled,
+        isInteger: isInteger,
+        isTrigger: isTrigger,
+        isOutput: isOutput,
+        isEnumeration: isEnumeration,
+        scalePoints: scalePoints,
+      ));
     }
 
     return ports;
   }
 
-  /// Load file parameters (atom:Path parameters) using rdflib
-  static List<FileParameter> _loadFileParametersSync(String uri, String bundlePath) {
+  /// Extract file parameters (atom:Path) from pre-parsed graphs
+  static List<FileParameter> _extractFileParameters(
+    Graph pluginGraph,
+    Graph? manifestGraph,
+  ) {
     final params = <FileParameter>[];
-    final g = Graph();
 
-    // Load plugin-specific TTL files (contains patch:writable declarations)
-    final pluginTtlFiles = _getPluginTtlFiles(uri, bundlePath);
-    final loadedPaths = <String>{};
-    for (final ttlFile in pluginTtlFiles) {
-      if (ttlFile.existsSync()) {
-        try {
-          loadedPaths.add(ttlFile.path);
-          g.parseTurtle(ttlFile.readAsStringSync());
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-    }
-
-    // Also read manifest.ttl for parameter definitions (lv2:Parameter with atom:Path)
-    // Some plugins define patch:writable in one file and lv2:Parameter in manifest.ttl
-    final manifestFile = File('$bundlePath/manifest.ttl');
-    if (manifestFile.existsSync() && !loadedPaths.contains(manifestFile.path)) {
-      try {
-        g.parseTurtle(manifestFile.readAsStringSync());
-      } catch (e) {
-        // Ignore parse errors
-      }
+    // Combine triples from both graphs for unified lookup
+    final allTriples = pluginGraph.triples.toList();
+    if (manifestGraph != null) {
+      allTriples.addAll(manifestGraph.triples);
     }
 
     // Find all patch:writable triples
-    final writableTriples = g.triples.where((t) =>
+    final writableTriples = allTriples.where((t) =>
         t.pre.value == 'http://lv2plug.in/ns/ext/patch#writable');
 
     for (final wt in writableTriples) {
       final paramRef = wt.obj;
 
       // Check if this parameter has rdfs:range atom:Path
-      final hasAtomPath = g.triples.any((t) =>
+      final hasAtomPath = allTriples.any((t) =>
           t.sub.value == paramRef.value &&
           t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#range' &&
           t.obj.value == 'http://lv2plug.in/ns/ext/atom#Path');
@@ -811,7 +745,7 @@ class LV2PluginCache {
       final paramUri = paramRef.value;
 
       // Extract label
-      final labelTriples = g.triples.where((t) =>
+      final labelTriples = allTriples.where((t) =>
           t.sub.value == paramRef.value &&
           t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#label');
       final label = labelTriples.isNotEmpty && labelTriples.first.obj is Literal
@@ -820,7 +754,7 @@ class LV2PluginCache {
 
       // Extract file types from mod:fileTypes
       final fileTypes = <String>[];
-      final fileTypesTriples = g.triples.where((t) =>
+      final fileTypesTriples = allTriples.where((t) =>
           t.sub.value == paramRef.value &&
           t.pre.value == 'http://moddevices.com/ns/mod#fileTypes');
 
