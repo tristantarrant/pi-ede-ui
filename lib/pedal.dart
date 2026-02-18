@@ -454,6 +454,19 @@ class LV2PluginCache {
       }
     }
 
+    // Some bundles (e.g., midifilter.lv2) put modgui data in manifest.ttl
+    if (label == null || thumbnailPath == null) {
+      final manifestFile = File('$bundlePath/manifest.ttl');
+      if (manifestFile.existsSync()) {
+        final content = manifestFile.readAsStringSync();
+        _extractModguiData(content, bundlePath, (l, b, t) {
+          label ??= l;
+          brand ??= b;
+          thumbnailPath ??= t;
+        }, uri: uri);
+      }
+    }
+
     // If no label from modgui, try doap:name from the main plugin TTL
     if (label == null) {
       label = _getDoapNameFromPluginTtl(uri, bundlePath);
