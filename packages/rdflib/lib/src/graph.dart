@@ -1293,25 +1293,66 @@ class Graph {
     return '<${uriRef.value}>';
   }
 
-  /// Replaces any lines that has #<space> with content shown before.
+  /// Removes Turtle comments from the content.
   ///
-  /// Note:
-  /// Current implementation is to match and replace line by line
+  /// See also: https://www.w3.org/TR/turtle/#sec-grammar-comments
+  /// Comments take the form of '#', outside an IRIREF or String,
+  /// and continue to the end of line.
   String _removeComments(String fileContent) {
-    String rtnStr = '';
-    List<String> lines = fileContent.split(Platform.isWindows ? '\r\n' : '\n');
-    for (var line in lines) {
-      // See also: https://www.w3.org/TR/turtle/#sec-grammar-comments
-      // comments in Turtle take the form of '#', outside an IRIREF or String,
-      // and continue to the end of line.
-      // Note to include a whitespace to exclude cases like <www.ex.org/bob#me>
-      if (line.startsWith('#')) {
-        continue;
+    final newline = Platform.isWindows ? '\r\n' : '\n';
+    final buffer = StringBuffer();
+    final lines = fileContent.split(newline);
+    for (var i = 0; i < lines.length; i++) {
+      if (i > 0) buffer.write(newline);
+      final line = lines[i];
+
+      // Walk through characters tracking string/IRI state
+      bool inDoubleQuote = false;
+      bool inSingleQuote = false;
+      bool inIRI = false;
+      bool escaped = false;
+      int commentStart = -1;
+
+      for (var j = 0; j < line.length; j++) {
+        final c = line[j];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (c == '\\') {
+          escaped = true;
+          continue;
+        }
+        if (!inSingleQuote && !inIRI && c == '"') {
+          inDoubleQuote = !inDoubleQuote;
+          continue;
+        }
+        if (!inDoubleQuote && !inIRI && c == "'") {
+          inSingleQuote = !inSingleQuote;
+          continue;
+        }
+        if (!inDoubleQuote && !inSingleQuote && !inIRI && c == '<') {
+          inIRI = true;
+          continue;
+        }
+        if (inIRI && c == '>') {
+          inIRI = false;
+          continue;
+        }
+        if (!inDoubleQuote && !inSingleQuote && !inIRI && c == '#') {
+          commentStart = j;
+          break;
+        }
       }
-      rtnStr += line.replaceAll(RegExp(r'\s*#\s.*$'), '');
-      rtnStr += Platform.isWindows ? '\r\n' : '\n';
+
+      if (commentStart >= 0) {
+        buffer.write(line.substring(0, commentStart));
+      } else {
+        buffer.write(line);
+      }
     }
-    return rtnStr;
+    buffer.write(newline);
+    return buffer.toString();
   }
 
   /// Preprocesses Turtle content to handle multiline string literals.
