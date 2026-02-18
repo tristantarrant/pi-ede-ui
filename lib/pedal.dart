@@ -741,13 +741,36 @@ class LV2PluginCache {
   static List<FileParameter> _loadFileParametersSync(String uri, String bundlePath) {
     final params = <FileParameter>[];
 
-    // Get plugin TTL files
-    final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
-    for (final ttlFile in ttlFiles) {
+    // First, get the plugin-specific TTL files to find patch:writable declarations
+    final pluginTtlFiles = _getPluginTtlFiles(uri, bundlePath);
+    final pluginContent = StringBuffer();
+    for (final ttlFile in pluginTtlFiles) {
       if (ttlFile.existsSync()) {
-        _parseFileParametersWithRegex(ttlFile.readAsStringSync(), params);
-        if (params.isNotEmpty) break;
+        try {
+          pluginContent.writeln(ttlFile.readAsStringSync());
+        } catch (e) {
+          // Ignore read errors
+        }
       }
+    }
+
+    // Also read manifest.ttl for parameter definitions (lv2:Parameter with atom:Path)
+    // Some plugins define patch:writable in one file and lv2:Parameter in manifest.ttl
+    final manifestFile = File('$bundlePath/manifest.ttl');
+    final manifestContent = manifestFile.existsSync()
+        ? manifestFile.readAsStringSync()
+        : '';
+
+    // Combine plugin content with manifest for full parsing
+    // But only use writable refs from the plugin-specific files
+    final combinedContent = '$pluginContent\n$manifestContent';
+
+    if (combinedContent.isNotEmpty) {
+      _parseFileParametersWithRegex(
+        combinedContent,
+        params,
+        writableSourceContent: pluginContent.toString(),
+      );
     }
 
     return params;
@@ -755,8 +778,14 @@ class LV2PluginCache {
 
   /// Parse file parameters from TTL content using regex
   /// File parameters are declared as patch:writable with rdfs:range atom:Path
-  static void _parseFileParametersWithRegex(String content, List<FileParameter> params) {
-    // Build prefix map from @prefix declarations
+  /// If writableSourceContent is provided, only look for patch:writable in that content
+  /// but look for parameter definitions in the full content.
+  static void _parseFileParametersWithRegex(
+    String content,
+    List<FileParameter> params, {
+    String? writableSourceContent,
+  }) {
+    // Build prefix map from @prefix declarations (from full content)
     final prefixMap = <String, String>{};
     final prefixRegex = RegExp(r'@prefix\s+(\w+):\s+<([^>]+)>\s*\.', multiLine: true);
     for (final match in prefixRegex.allMatches(content)) {
@@ -767,20 +796,23 @@ class LV2PluginCache {
       }
     }
 
+    // Source for finding patch:writable declarations
+    final writableSource = writableSourceContent ?? content;
+
     // Collect all parameter references declared as writable
     // Matches both: patch:writable <full_uri> and patch:writable prefix:name
     final writableRefs = <String>{};
 
     // Match full URIs: patch:writable <uri>
     final writableUriRegex = RegExp(r'patch:writable\s+<([^>]+)>', multiLine: true);
-    for (final match in writableUriRegex.allMatches(content)) {
+    for (final match in writableUriRegex.allMatches(writableSource)) {
       final uri = match.group(1);
       if (uri != null) writableRefs.add('<$uri>');
     }
 
     // Match prefixed names: patch:writable prefix:name
     final writablePrefixRegex = RegExp(r'patch:writable\s+(\w+:\w+)', multiLine: true);
-    for (final match in writablePrefixRegex.allMatches(content)) {
+    for (final match in writablePrefixRegex.allMatches(writableSource)) {
       final prefixedName = match.group(1);
       if (prefixedName != null) writableRefs.add(prefixedName);
     }
