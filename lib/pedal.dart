@@ -479,7 +479,7 @@ class LV2PluginCache {
     );
   }
 
-  /// Extract modgui data (label, brand, thumbnail) from TTL content using regex
+  /// Extract modgui data (label, brand, thumbnail) from TTL content using rdflib
   /// If uri is provided, only extract data for that specific plugin URI
   static void _extractModguiData(
     String content,
@@ -491,41 +491,62 @@ class LV2PluginCache {
     String? brand;
     String? thumbnailPath;
 
-    String searchContent = content;
+    try {
+      final g = Graph();
+      g.parseTurtle(content);
 
-    // If a specific URI is provided and the file contains multiple plugins,
-    // try to extract only the block for that URI
-    if (uri != null && content.contains(uri)) {
-      // Find the block starting with <uri> and ending with ] .
-      // The pattern matches: <uri> modgui:gui [ ... ] .
-      final escapedUri = RegExp.escape(uri);
-      final blockMatch = RegExp(
-        '<$escapedUri>\\s*modgui:gui\\s*\\[([^\\]]*(?:\\[[^\\]]*\\][^\\]]*)*)\\]',
-        multiLine: true,
-        dotAll: true,
-      ).firstMatch(content);
+      if (uri != null) {
+        // Find the gui blank node for this specific plugin URI
+        final guiTriples = g.triples.where((t) =>
+            t.sub.value == uri &&
+            t.pre.value == 'http://moddevices.com/ns/modgui#gui');
 
-      if (blockMatch != null) {
-        searchContent = blockMatch.group(0) ?? content;
+        if (guiTriples.isNotEmpty) {
+          final guiNode = guiTriples.first.obj;
+
+          final labelTriples = g.triples.where((t) =>
+              t.sub == guiNode &&
+              t.pre.value == 'http://moddevices.com/ns/modgui#label');
+          if (labelTriples.isNotEmpty && labelTriples.first.obj is Literal) {
+            label = (labelTriples.first.obj as Literal).value;
+          }
+
+          final brandTriples = g.triples.where((t) =>
+              t.sub == guiNode &&
+              t.pre.value == 'http://moddevices.com/ns/modgui#brand');
+          if (brandTriples.isNotEmpty && brandTriples.first.obj is Literal) {
+            brand = (brandTriples.first.obj as Literal).value;
+          }
+
+          final thumbTriples = g.triples.where((t) =>
+              t.sub == guiNode &&
+              t.pre.value == 'http://moddevices.com/ns/modgui#thumbnail');
+          if (thumbTriples.isNotEmpty) {
+            thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
+          }
+        }
+      } else {
+        // No specific URI - extract from any modgui properties
+        final labelTriples = g.triples.where((t) =>
+            t.pre.value == 'http://moddevices.com/ns/modgui#label');
+        if (labelTriples.isNotEmpty && labelTriples.first.obj is Literal) {
+          label = (labelTriples.first.obj as Literal).value;
+        }
+
+        final brandTriples = g.triples.where((t) =>
+            t.pre.value == 'http://moddevices.com/ns/modgui#brand');
+        if (brandTriples.isNotEmpty && brandTriples.first.obj is Literal) {
+          brand = (brandTriples.first.obj as Literal).value;
+        }
+
+        final thumbTriples = g.triples.where((t) =>
+            t.pre.value == 'http://moddevices.com/ns/modgui#thumbnail');
+        if (thumbTriples.isNotEmpty) {
+          thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
+        }
       }
-    }
-
-    // Extract label: modgui:label "value"
-    final labelMatch = RegExp(r'modgui:label\s+"([^"]+)"').firstMatch(searchContent);
-    if (labelMatch != null) {
-      label = labelMatch.group(1);
-    }
-
-    // Extract brand: modgui:brand "value"
-    final brandMatch = RegExp(r'modgui:brand\s+"([^"]+)"').firstMatch(searchContent);
-    if (brandMatch != null) {
-      brand = brandMatch.group(1);
-    }
-
-    // Extract thumbnail: modgui:thumbnail <path>
-    final thumbMatch = RegExp(r'modgui:thumbnail\s+<([^>]+)>').firstMatch(searchContent);
-    if (thumbMatch != null) {
-      thumbnailPath = '$bundlePath/${thumbMatch.group(1)}';
+    } catch (e) {
+      // Some TTL files may be malformed
     }
 
     onData(label, brand, thumbnailPath);
@@ -607,149 +628,143 @@ class LV2PluginCache {
     return null;
   }
 
-  /// Load control ports synchronously using regex (rdflib can't handle port lists)
+  /// Load control ports synchronously using rdflib
   static List<ControlPort> _loadControlPortsSync(String uri, String bundlePath) {
     final ports = <ControlPort>[];
 
-    // Get plugin TTL files
     final ttlFiles = _getPluginTtlFiles(uri, bundlePath);
     for (final ttlFile in ttlFiles) {
-      if (ttlFile.existsSync()) {
-        _parseControlPortsWithRegex(ttlFile.readAsStringSync(), ports);
+      if (!ttlFile.existsSync()) continue;
+      try {
+        final g = Graph();
+        g.parseTurtle(ttlFile.readAsStringSync());
+
+        // Find all nodes with rdf:type lv2:ControlPort
+        final controlPortNodes = g.triples.where((t) =>
+            t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+            t.obj.value == 'http://lv2plug.in/ns/lv2core#ControlPort'
+        ).map((t) => t.sub).toList();
+
+        for (final node in controlPortNodes) {
+          // Extract symbol (required)
+          final symbolTriples = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#symbol');
+          if (symbolTriples.isEmpty) continue;
+          final symbol = (symbolTriples.first.obj as Literal).value;
+
+          // Extract name
+          final nameTriples = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#name');
+          final name = nameTriples.isNotEmpty
+              ? (nameTriples.first.obj as Literal).value
+              : symbol;
+
+          // Check if it's an output port
+          final isOutput = g.triples.any((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+              t.obj.value == 'http://lv2plug.in/ns/lv2core#OutputPort');
+
+          // Extract min/max/default
+          final minTriples = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#minimum');
+          final maxTriples = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#maximum');
+          final defTriples = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#default');
+
+          final minimum = minTriples.isNotEmpty
+              ? double.tryParse((minTriples.first.obj as Literal).value) ?? 0
+              : 0.0;
+          final maximum = maxTriples.isNotEmpty
+              ? double.tryParse((maxTriples.first.obj as Literal).value) ?? 1
+              : 1.0;
+          final defaultValue = defTriples.isNotEmpty
+              ? double.tryParse((defTriples.first.obj as Literal).value) ?? 0
+              : 0.0;
+
+          // Check port properties
+          final portProperties = g.triples.where((t) =>
+              t.sub == node &&
+              t.pre.value == 'http://lv2plug.in/ns/lv2core#portProperty'
+          ).map((t) => t.obj.value).toSet();
+
+          final isToggled = portProperties.contains('http://lv2plug.in/ns/lv2core#toggled');
+          final isInteger = portProperties.contains('http://lv2plug.in/ns/lv2core#integer');
+          final isEnumeration = portProperties.contains('http://lv2plug.in/ns/lv2core#enumeration');
+          final isTrigger = portProperties.contains('http://lv2plug.in/ns/ext/port-props#trigger');
+
+          // Parse scale points for enumeration ports
+          final scalePoints = <ScalePoint>[];
+          if (isEnumeration) {
+            final spTriples = g.triples.where((t) =>
+                t.sub == node &&
+                t.pre.value == 'http://lv2plug.in/ns/lv2core#scalePoint');
+
+            for (final sp in spTriples) {
+              final spNode = sp.obj;
+              final spLabelTriples = g.triples.where((t) =>
+                  t.sub == spNode &&
+                  t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#label');
+              final spValueTriples = g.triples.where((t) =>
+                  t.sub == spNode &&
+                  t.pre.value == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#value');
+
+              if (spLabelTriples.isNotEmpty && spValueTriples.isNotEmpty) {
+                scalePoints.add(ScalePoint(
+                  label: (spLabelTriples.first.obj as Literal).value,
+                  value: double.tryParse(
+                      (spValueTriples.first.obj as Literal).value) ?? 0,
+                ));
+              }
+            }
+            scalePoints.sort((a, b) => a.value.compareTo(b.value));
+          }
+
+          ports.add(ControlPort(
+            symbol: symbol,
+            name: name,
+            minimum: minimum,
+            maximum: maximum,
+            defaultValue: defaultValue,
+            isToggled: isToggled,
+            isInteger: isInteger,
+            isTrigger: isTrigger,
+            isOutput: isOutput,
+            isEnumeration: isEnumeration,
+            scalePoints: scalePoints,
+          ));
+        }
+
         if (ports.isNotEmpty) break;
+      } catch (e) {
+        // Skip problematic TTL files
       }
     }
 
     return ports;
   }
 
-  /// Parse control ports from TTL content using regex
-  static void _parseControlPortsWithRegex(String content, List<ControlPort> ports) {
-    // Find port block starts: [ a ...lv2:ControlPort
-    final portStartRegex = RegExp(
-      r'\[\s*a\s+[^;]*lv2:ControlPort',
-      multiLine: true,
-    );
-
-    // For each port start, find the matching closing bracket
-    final portBlocks = <String>[];
-    for (final match in portStartRegex.allMatches(content)) {
-      final start = match.start;
-      var depth = 0;
-      var end = start;
-      for (var i = start; i < content.length; i++) {
-        if (content[i] == '[') {
-          depth++;
-        } else if (content[i] == ']') {
-          depth--;
-          if (depth == 0) {
-            end = i + 1;
-            break;
-          }
-        }
-      }
-      if (end > start) {
-        portBlocks.add(content.substring(start, end));
-      }
-    }
-
-    // Regex for numbers including scientific notation (e.g., 3.6e+02, 1e-05)
-    final numRegex = r'([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)';
-
-    for (final block in portBlocks) {
-
-      // Check if it's an output port
-      final isOutput = block.contains('lv2:OutputPort');
-
-      // Extract symbol
-      final symbolMatch = RegExp(r'lv2:symbol\s+"([^"]+)"').firstMatch(block);
-      if (symbolMatch == null) continue;
-      final symbol = symbolMatch.group(1)!;
-
-      // Extract name
-      final nameMatch = RegExp(r'lv2:name\s+"([^"]+)"').firstMatch(block);
-      final name = nameMatch?.group(1) ?? symbol;
-
-      // Extract minimum (handles scientific notation)
-      final minMatch = RegExp('lv2:minimum\\s+$numRegex').firstMatch(block);
-      final minimum = double.tryParse(minMatch?.group(1) ?? '0') ?? 0;
-
-      // Extract maximum (handles scientific notation)
-      final maxMatch = RegExp('lv2:maximum\\s+$numRegex').firstMatch(block);
-      final maximum = double.tryParse(maxMatch?.group(1) ?? '1') ?? 1;
-
-      // Extract default (handles scientific notation)
-      final defMatch = RegExp('lv2:default\\s+$numRegex').firstMatch(block);
-      final defaultValue = double.tryParse(defMatch?.group(1) ?? '0') ?? 0;
-
-      // Check port properties
-      final isToggled = block.contains('lv2:toggled');
-      final isInteger = block.contains('lv2:integer');
-      final isTrigger = block.contains('epp:trigger') || block.contains('port-props#trigger');
-      final isEnumeration = block.contains('lv2:enumeration');
-
-      // Parse scale points for enumeration ports
-      final scalePoints = <ScalePoint>[];
-      if (isEnumeration) {
-        // Match scale point blocks in either order:
-        // [ rdfs:label "Label" ; rdf:value 0 ; ] or [ rdf:value 0 ; rdfs:label "Label" ; ]
-        // The trailing ; before ] is optional
-        final scalePointRegex1 = RegExp(
-          r'\[\s*rdfs:label\s+"([^"]+)"\s*;\s*rdf:value\s+' + numRegex + r'\s*;?\s*\]',
-          multiLine: true,
-        );
-        final scalePointRegex2 = RegExp(
-          r'\[\s*rdf:value\s+' + numRegex + r'\s*;\s*rdfs:label\s+"([^"]+)"\s*;?\s*\]',
-          multiLine: true,
-        );
-
-        for (final spMatch in scalePointRegex1.allMatches(block)) {
-          final label = spMatch.group(1);
-          final value = double.tryParse(spMatch.group(2) ?? '0') ?? 0;
-          if (label != null) {
-            scalePoints.add(ScalePoint(label: label, value: value));
-          }
-        }
-        for (final spMatch in scalePointRegex2.allMatches(block)) {
-          final value = double.tryParse(spMatch.group(1) ?? '0') ?? 0;
-          final label = spMatch.group(2);
-          if (label != null) {
-            scalePoints.add(ScalePoint(label: label, value: value));
-          }
-        }
-        // Sort by value
-        scalePoints.sort((a, b) => a.value.compareTo(b.value));
-      }
-
-      ports.add(ControlPort(
-        symbol: symbol,
-        name: name,
-        minimum: minimum,
-        maximum: maximum,
-        defaultValue: defaultValue,
-        isToggled: isToggled,
-        isInteger: isInteger,
-        isTrigger: isTrigger,
-        isOutput: isOutput,
-        isEnumeration: isEnumeration,
-        scalePoints: scalePoints,
-      ));
-    }
-  }
-
-  /// Load file parameters (atom:Path parameters) using regex
+  /// Load file parameters (atom:Path parameters) using rdflib
   static List<FileParameter> _loadFileParametersSync(String uri, String bundlePath) {
     final params = <FileParameter>[];
+    final g = Graph();
 
-    // First, get the plugin-specific TTL files to find patch:writable declarations
+    // Load plugin-specific TTL files (contains patch:writable declarations)
     final pluginTtlFiles = _getPluginTtlFiles(uri, bundlePath);
-    final pluginContent = StringBuffer();
+    final loadedPaths = <String>{};
     for (final ttlFile in pluginTtlFiles) {
       if (ttlFile.existsSync()) {
         try {
-          pluginContent.writeln(ttlFile.readAsStringSync());
+          loadedPaths.add(ttlFile.path);
+          g.parseTurtle(ttlFile.readAsStringSync());
         } catch (e) {
-          // Ignore read errors
+          // Ignore parse errors
         }
       }
     }
@@ -757,144 +772,61 @@ class LV2PluginCache {
     // Also read manifest.ttl for parameter definitions (lv2:Parameter with atom:Path)
     // Some plugins define patch:writable in one file and lv2:Parameter in manifest.ttl
     final manifestFile = File('$bundlePath/manifest.ttl');
-    final manifestContent = manifestFile.existsSync()
-        ? manifestFile.readAsStringSync()
-        : '';
-
-    // Combine plugin content with manifest for full parsing
-    // But only use writable refs from the plugin-specific files
-    final combinedContent = '$pluginContent\n$manifestContent';
-
-    if (combinedContent.isNotEmpty) {
-      _parseFileParametersWithRegex(
-        combinedContent,
-        params,
-        writableSourceContent: pluginContent.toString(),
-      );
-    }
-
-    return params;
-  }
-
-  /// Parse file parameters from TTL content using regex
-  /// File parameters are declared as patch:writable with rdfs:range atom:Path
-  /// If writableSourceContent is provided, only look for patch:writable in that content
-  /// but look for parameter definitions in the full content.
-  static void _parseFileParametersWithRegex(
-    String content,
-    List<FileParameter> params, {
-    String? writableSourceContent,
-  }) {
-    // Build prefix map from @prefix declarations (from full content)
-    final prefixMap = <String, String>{};
-    final prefixRegex = RegExp(r'@prefix\s+(\w+):\s+<([^>]+)>\s*\.', multiLine: true);
-    for (final match in prefixRegex.allMatches(content)) {
-      final prefix = match.group(1);
-      final uri = match.group(2);
-      if (prefix != null && uri != null) {
-        prefixMap[prefix] = uri;
+    if (manifestFile.existsSync() && !loadedPaths.contains(manifestFile.path)) {
+      try {
+        g.parseTurtle(manifestFile.readAsStringSync());
+      } catch (e) {
+        // Ignore parse errors
       }
     }
 
-    // Source for finding patch:writable declarations
-    final writableSource = writableSourceContent ?? content;
+    // Find all patch:writable triples
+    final writableTriples = g.triples.where((t) =>
+        t.pre.value == 'http://lv2plug.in/ns/ext/patch#writable');
 
-    // Collect all parameter references declared as writable
-    // Matches both: patch:writable <full_uri> and patch:writable prefix:name
-    final writableRefs = <String>{};
+    for (final wt in writableTriples) {
+      final paramRef = wt.obj;
 
-    // Match full URIs: patch:writable <uri>
-    final writableUriRegex = RegExp(r'patch:writable\s+<([^>]+)>', multiLine: true);
-    for (final match in writableUriRegex.allMatches(writableSource)) {
-      final uri = match.group(1);
-      if (uri != null) writableRefs.add('<$uri>');
-    }
+      // Check if this parameter has rdfs:range atom:Path
+      final hasAtomPath = g.triples.any((t) =>
+          t.sub.value == paramRef.value &&
+          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#range' &&
+          t.obj.value == 'http://lv2plug.in/ns/ext/atom#Path');
 
-    // Match prefixed names: patch:writable prefix:name
-    final writablePrefixRegex = RegExp(r'patch:writable\s+(\w+:\w+)', multiLine: true);
-    for (final match in writablePrefixRegex.allMatches(writableSource)) {
-      final prefixedName = match.group(1);
-      if (prefixedName != null) writableRefs.add(prefixedName);
-    }
+      if (!hasAtomPath) continue;
 
-    if (writableRefs.isEmpty) return;
-
-    // Find all lv2:Parameter definitions with atom:Path range
-    // Match both full URI and prefixed forms
-    // Pattern: <uri> or prefix:name  a lv2:Parameter ; ... rdfs:range atom:Path
-    final paramDefRegex = RegExp(
-      r'((?:<[^>]+>)|(?:\w+:\w+))\s+a\s+lv2:Parameter\s*;([^.]*(?:\[[^\]]*\][^.]*)*)\.',
-      multiLine: true,
-      dotAll: true,
-    );
-
-    for (final match in paramDefRegex.allMatches(content)) {
-      final paramRef = match.group(1)?.trim();
-      final block = match.group(0) ?? '';
-
-      if (paramRef == null) continue;
-
-      // Check if this parameter is in the writable list
-      if (!writableRefs.contains(paramRef)) continue;
-
-      // Check if this is an atom:Path parameter
-      if (!block.contains('atom:Path')) continue;
-
-      // Resolve the full URI
-      String paramUri;
-      if (paramRef.startsWith('<') && paramRef.endsWith('>')) {
-        paramUri = paramRef.substring(1, paramRef.length - 1);
-      } else if (paramRef.contains(':')) {
-        final parts = paramRef.split(':');
-        final prefix = parts[0];
-        final localName = parts[1];
-        final baseUri = prefixMap[prefix];
-        if (baseUri != null) {
-          paramUri = '$baseUri$localName';
-        } else {
-          paramUri = paramRef;
-        }
-      } else {
-        paramUri = paramRef;
-      }
+      final paramUri = paramRef.value;
 
       // Extract label
-      final labelMatch = RegExp(r'rdfs:label\s+"([^"]+)"').firstMatch(block);
-      final label = labelMatch?.group(1) ?? paramUri.split('#').last.split('/').last;
+      final labelTriples = g.triples.where((t) =>
+          t.sub.value == paramRef.value &&
+          t.pre.value == 'http://www.w3.org/2000/01/rdf-schema#label');
+      final label = labelTriples.isNotEmpty && labelTriples.first.obj is Literal
+          ? (labelTriples.first.obj as Literal).value
+          : paramUri.split('#').last.split('/').last;
 
       // Extract file types from mod:fileTypes
       final fileTypes = <String>[];
+      final fileTypesTriples = g.triples.where((t) =>
+          t.sub.value == paramRef.value &&
+          t.pre.value == 'http://moddevices.com/ns/mod#fileTypes');
 
-      final fileTypesMatch = RegExp(
-        r'mod:fileTypes\s+([^;]+)',
-        multiLine: true,
-      ).firstMatch(block);
-
-      if (fileTypesMatch != null) {
-        final typesStr = fileTypesMatch.group(1)!.trim();
-
-        // Check if it's a quoted string (e.g., "nammodel,aidadspmodel,nam")
-        final quotedMatch = RegExp(r'"([^"]+)"').firstMatch(typesStr);
-        if (quotedMatch != null) {
-          // Parse comma-separated string
-          final types = quotedMatch.group(1)!.split(',');
-          for (final type in types) {
+      for (final ft in fileTypesTriples) {
+        final obj = ft.obj;
+        if (obj is Literal) {
+          // Comma-separated string (e.g., "nammodel,aidadspmodel,nam")
+          for (final type in obj.value.split(',')) {
             final normalizedType = _normalizeFileType(type.trim());
             if (normalizedType != null && !fileTypes.contains(normalizedType)) {
               fileTypes.add(normalizedType);
             }
           }
-        } else {
-          // Try mod:TypeName format
-          final typeMatches = RegExp(r'mod:(\w+)').allMatches(typesStr);
-          for (final typeMatch in typeMatches) {
-            final typeId = typeMatch.group(1);
-            if (typeId != null) {
-              final fileType = _modTypeToFileType(typeId);
-              if (fileType != null && !fileTypes.contains(fileType)) {
-                fileTypes.add(fileType);
-              }
-            }
+        } else if (obj is URIRef) {
+          // mod:TypeName format - extract local name
+          final localName = obj.value.split('#').last.split('/').last;
+          final fileType = _modTypeToFileType(localName);
+          if (fileType != null && !fileTypes.contains(fileType)) {
+            fileTypes.add(fileType);
           }
         }
       }
@@ -909,6 +841,8 @@ class LV2PluginCache {
         fileTypes: fileTypes,
       ));
     }
+
+    return params;
   }
 
   /// Normalize a file type string to our standard identifiers
