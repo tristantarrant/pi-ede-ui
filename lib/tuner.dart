@@ -81,7 +81,10 @@ class _TunerWidgetState extends State<TunerWidget> {
         // Tuner display
         Expanded(
           child: Center(
-            child: _buildTunerDisplay(),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _buildTunerDisplay(),
+            ),
           ),
         ),
         // Controls
