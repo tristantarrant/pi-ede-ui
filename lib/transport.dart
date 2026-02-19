@@ -111,22 +111,21 @@ class _TransportWidgetState extends State<TransportWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Tempo display
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Column(
                 children: [
                   Text(
                     '${_tempo.toStringAsFixed(1)} BPM',
                     style: Theme.of(context).textTheme.headlineLarge,
                   ),
-                  const SizedBox(height: 16),
                   Slider(
                     value: _tempo.clamp(20, 280),
                     min: 20,
@@ -136,23 +135,16 @@ class _TransportWidgetState extends State<TransportWidget> {
                     onChanged: _setTempo,
                     onChangeEnd: (_) => _commitTempo(),
                   ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('20', style: Theme.of(context).textTheme.labelSmall),
-                      Text('280', style: Theme.of(context).textTheme.labelSmall),
-                    ],
-                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Beats per bar
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -173,13 +165,12 @@ class _TransportWidgetState extends State<TransportWidget> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Transport controls
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // Play/Stop button
               ElevatedButton.icon(
                 onPressed: _togglePlay,
                 icon: Icon(_playing ? Icons.stop : Icons.play_arrow),
@@ -187,16 +178,15 @@ class _TransportWidgetState extends State<TransportWidget> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _playing ? Colors.red : Colors.green,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                 ),
               ),
-              // Tap tempo button
               ElevatedButton.icon(
                 onPressed: _tapTempo,
                 icon: const Icon(Icons.touch_app),
                 label: const Text('Tap'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                 ),
               ),
             ],
