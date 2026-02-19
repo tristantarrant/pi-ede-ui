@@ -131,7 +131,8 @@ class HMIServer {
   }
 
   void handleNewClient(Socket client) {
-    log.info("<${client.remoteAddress.toString()}:${client.remotePort}> connected.");
+    final clientAddress = "${client.remoteAddress}:${client.remotePort}";
+    log.info("<$clientAddress> connected.");
     _clients.add(client);
     _buffers[client] = [];
 
@@ -144,10 +145,10 @@ class HMIServer {
         _clients.remove(client);
         _buffers.remove(client);
         client.close();
-        log.info("<${client.remoteAddress.toString()}:${client.remotePort}> disconnected.");
+        log.info("<$clientAddress> disconnected.");
       },
       onError: (error) {
-        log.warning("Client error: $error");
+        log.warning("<$clientAddress> error: $error");
         _clients.remove(client);
         _buffers.remove(client);
         client.close();
