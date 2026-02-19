@@ -88,6 +88,7 @@ class HMIServer {
   final _menuItemController = StreamController<MenuItemEvent>.broadcast();
   final _profilesController = StreamController<ProfilesEvent>.broadcast();
   final _fileParamController = StreamController<FileParamEvent>.broadcast();
+  final _pedalboardClearController = StreamController<void>.broadcast();
 
   /// Stream of pedalboard change events
   Stream<PedalboardChangeEvent> get onPedalboardChange => _pedalboardChangeController.stream;
@@ -109,6 +110,9 @@ class HMIServer {
 
   /// Stream of file parameter events
   Stream<FileParamEvent> get onFileParam => _fileParamController.stream;
+
+  /// Stream of pedalboard clear events
+  Stream<void> get onPedalboardClear => _pedalboardClearController.stream;
 
   HMIServer.init({int port = 9898}) {
     ServerSocket.bind(InternetAddress.anyIPv4, port).then((value) {
@@ -194,6 +198,12 @@ class HMIServer {
         _sendResponse(client, 0);
         break;
 
+      case HMIProtocol.CMD_PEDALBOARD_CLEAR:
+        log.info("Pedalboard clear");
+        _pedalboardClearController.add(null);
+        _sendResponse(client, 0);
+        break;
+
       case HMIProtocol.CMD_PEDALBOARD_CHANGE:
         _handlePedalboardChange(client, args);
         break;
@@ -224,6 +234,25 @@ class HMIServer {
 
       case HMIProtocol.CMD_FILE_PARAM_CURRENT:
         _handleFileParamCurrent(client, args);
+        break;
+
+      case HMIProtocol.CMD_INITIAL_STATE:
+        log.info("Initial state received");
+        _sendResponse(client, 0);
+        break;
+
+      case HMIProtocol.CMD_DUO_BOOT:
+        log.info("Boot notification received");
+        _sendResponse(client, 0);
+        break;
+
+      case HMIProtocol.CMD_SNAPSHOT_NAME_SET:
+        log.info("Snapshot name set: ${args.join(' ')}");
+        _sendResponse(client, 0);
+        break;
+
+      case HMIProtocol.CMD_RESPONSE:
+        log.fine("Response received: ${args.join(' ')}");
         break;
 
       default:
@@ -571,6 +600,7 @@ class HMIServer {
     _snapshotsController.close();
     _menuItemController.close();
     _profilesController.close();
+    _pedalboardClearController.close();
     for (final client in _clients) {
       client.close();
     }

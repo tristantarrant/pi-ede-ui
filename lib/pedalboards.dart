@@ -30,6 +30,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   Pedal? _selectedPedal;
   StreamSubscription<PedalboardLoadEvent>? _loadSubscription;
   StreamSubscription<FileParamEvent>? _fileParamSubscription;
+  StreamSubscription<void>? _clearSubscription;
   PageController? _pageController;
 
   // Store file param values received from HMI (instance -> paramUri -> path)
@@ -84,6 +85,16 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           curve: Curves.easeInOut,
         );
       }
+    });
+
+    _clearSubscription = hmi.onPedalboardClear.listen((_) {
+      log.info("HMI pedalboard clear event");
+      setState(() {
+        _editMode = false;
+        _pedals = null;
+        _selectedPedal = null;
+      });
+      _fileParamValues.clear();
     });
 
     _fileParamSubscription = hmi.onFileParam.listen((event) {
@@ -169,6 +180,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   void dispose() {
     _loadSubscription?.cancel();
     _fileParamSubscription?.cancel();
+    _clearSubscription?.cancel();
     _pageController?.dispose();
     super.dispose();
   }
