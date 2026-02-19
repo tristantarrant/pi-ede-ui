@@ -379,7 +379,7 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
       children: [
         // Header with back button
         Padding(
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
           child: Row(
             children: [
               IconButton(
@@ -398,9 +398,15 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           ),
         ),
         const Divider(height: 1),
-        // Pedal list
+        // Pedal grid
         Expanded(
-          child: ListView.builder(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
             itemCount: _pedals!.length,
             itemBuilder: (context, index) {
               final pedal = _pedals![index];
@@ -413,47 +419,50 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   }
 
   Widget _buildPedalTile(Pedal pedal) {
-    Widget thumbnail;
-    if (pedal.thumbnailPath != null && File(pedal.thumbnailPath!).existsSync()) {
-      thumbnail = Image.file(
-        File(pedal.thumbnailPath!),
-        width: 64,
-        height: 64,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildDefaultThumbnail();
-        },
-      );
-    } else {
-      thumbnail = _buildDefaultThumbnail();
-    }
+    final hasThumbnail = pedal.thumbnailPath != null && File(pedal.thumbnailPath!).existsSync();
 
-    return ListTile(
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: thumbnail,
-      ),
-      title: Text(pedal.label ?? pedal.instanceName),
-      subtitle: pedal.brand != null ? Text(pedal.brand!) : null,
-      trailing: Icon(
-        pedal.enabled ? Icons.power : Icons.power_off,
-        color: pedal.enabled ? Colors.green : Colors.grey,
-      ),
+    return GestureDetector(
       onTap: () {
         log.info('Opening editor for pedal: ${pedal.label}');
         setState(() {
           _selectedPedal = pedal;
         });
       },
-    );
-  }
-
-  Widget _buildDefaultThumbnail() {
-    return Container(
-      width: 64,
-      height: 64,
-      color: Colors.grey.shade300,
-      child: const Icon(Icons.extension, size: 32),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: hasThumbnail
+                  ? Image.file(
+                      File(pedal.thumbnailPath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: Colors.grey.shade300,
+                          child: const Icon(Icons.extension, size: 32),
+                        );
+                      },
+                    )
+                  : Container(
+                      color: Colors.grey.shade300,
+                      child: const Icon(Icons.extension, size: 32),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: Text(
+                pedal.label ?? pedal.instanceName,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
