@@ -168,28 +168,37 @@ class _TransportWidgetState extends State<TransportWidget> {
           const SizedBox(height: 8),
 
           // Transport controls
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _togglePlay,
-                icon: Icon(_playing ? Icons.stop : Icons.play_arrow),
-                label: Text(_playing ? 'Stop' : 'Play'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _playing ? Colors.red : Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ElevatedButton.icon(
+                      onPressed: _togglePlay,
+                      icon: Icon(_playing ? Icons.stop : Icons.play_arrow, size: 32),
+                      label: Text(_playing ? 'Stop' : 'Play', style: const TextStyle(fontSize: 20)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _playing ? Colors.red : Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              ElevatedButton.icon(
-                onPressed: _tapTempo,
-                icon: const Icon(Icons.touch_app),
-                label: const Text('Tap'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: ElevatedButton.icon(
+                      onPressed: _tapTempo,
+                      icon: const Icon(Icons.touch_app, size: 32),
+                      label: const Text('Tap', style: TextStyle(fontSize: 20)),
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
