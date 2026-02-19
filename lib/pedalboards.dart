@@ -419,7 +419,13 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   }
 
   Widget _buildPedalTile(Pedal pedal) {
-    final hasThumbnail = pedal.thumbnailPath != null && File(pedal.thumbnailPath!).existsSync();
+    // Prefer screenshot (higher resolution) over thumbnail
+    String? imagePath;
+    if (pedal.screenshotPath != null && File(pedal.screenshotPath!).existsSync()) {
+      imagePath = pedal.screenshotPath;
+    } else if (pedal.thumbnailPath != null && File(pedal.thumbnailPath!).existsSync()) {
+      imagePath = pedal.thumbnailPath;
+    }
 
     return GestureDetector(
       onTap: () {
@@ -434,10 +440,11 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: hasThumbnail
+              child: imagePath != null
                   ? Image.file(
-                      File(pedal.thumbnailPath!),
+                      File(imagePath),
                       fit: BoxFit.cover,
+                      filterQuality: FilterQuality.medium,
                       errorBuilder: (context, error, stackTrace) {
                         return Container(
                           color: Colors.grey.shade300,

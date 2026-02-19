@@ -135,6 +135,7 @@ class Pedal {
   String? label;
   String? brand;
   String? thumbnailPath;
+  String? screenshotPath;
   List<ControlPort>? controlPorts;
   List<FileParameter>? fileParameters;
 
@@ -155,6 +156,7 @@ class Pedal {
       label = info.label;
       brand = info.brand;
       thumbnailPath = info.thumbnailPath;
+      screenshotPath = info.screenshotPath;
 
       // Load control ports and apply current values
       controlPorts = info.controlPorts.map((port) {
@@ -199,6 +201,7 @@ class LV2PluginInfo {
   final String? label;
   final String? brand;
   final String? thumbnailPath;
+  final String? screenshotPath;
   final List<ControlPort> controlPorts;
   final List<FileParameter> fileParameters;
 
@@ -208,6 +211,7 @@ class LV2PluginInfo {
     this.label,
     this.brand,
     this.thumbnailPath,
+    this.screenshotPath,
     List<ControlPort>? controlPorts,
     List<FileParameter>? fileParameters,
   }) : controlPorts = controlPorts ?? [],
@@ -219,6 +223,7 @@ class LV2PluginInfo {
     'label': label,
     'brand': brand,
     'thumbnailPath': thumbnailPath,
+    'screenshotPath': screenshotPath,
     'controlPorts': controlPorts.map((p) => p.toJson()).toList(),
     'fileParameters': fileParameters.map((p) => p.toJson()).toList(),
   };
@@ -229,6 +234,7 @@ class LV2PluginInfo {
     label: json['label'],
     brand: json['brand'],
     thumbnailPath: json['thumbnailPath'],
+    screenshotPath: json['screenshotPath'],
     controlPorts: (json['controlPorts'] as List?)
         ?.map((p) => ControlPort.fromJson(p))
         .toList(),
@@ -415,6 +421,7 @@ class LV2PluginCache {
     String? label;
     String? brand;
     String? thumbnailPath;
+    String? screenshotPath;
 
     // Parse manifest.ttl once (reused for TTL file lookup, modgui, file params)
     Graph? manifestGraph;
@@ -460,10 +467,11 @@ class LV2PluginCache {
       try {
         final g = Graph();
         g.parseTurtle(modguiFile.readAsStringSync());
-        _extractModguiDataFromGraph(g, bundlePath, (l, b, t) {
+        _extractModguiDataFromGraph(g, bundlePath, (l, b, t, s) {
           label = l;
           brand = b;
           thumbnailPath = t;
+          screenshotPath = s;
         }, uri: uri);
       } catch (e) {
         // modgui.ttl parse failed
@@ -477,10 +485,11 @@ class LV2PluginCache {
         try {
           final g = Graph();
           g.parseTurtle(modguisFile.readAsStringSync());
-          _extractModguiDataFromGraph(g, bundlePath, (l, b, t) {
+          _extractModguiDataFromGraph(g, bundlePath, (l, b, t, s) {
             label ??= l;
             brand ??= b;
             thumbnailPath ??= t;
+            screenshotPath ??= s;
           }, uri: uri);
         } catch (e) {
           // modguis.ttl parse failed
@@ -490,19 +499,21 @@ class LV2PluginCache {
 
     // If missing data, check plugin TTL (already parsed into pluginGraph)
     if (label == null || thumbnailPath == null) {
-      _extractModguiDataFromGraph(pluginGraph, bundlePath, (l, b, t) {
+      _extractModguiDataFromGraph(pluginGraph, bundlePath, (l, b, t, s) {
         label ??= l;
         brand ??= b;
         thumbnailPath ??= t;
+        screenshotPath ??= s;
       }, uri: uri);
     }
 
     // Some bundles (e.g., midifilter.lv2) put modgui data in manifest.ttl
     if ((label == null || thumbnailPath == null) && manifestGraph != null) {
-      _extractModguiDataFromGraph(manifestGraph, bundlePath, (l, b, t) {
+      _extractModguiDataFromGraph(manifestGraph, bundlePath, (l, b, t, s) {
         label ??= l;
         brand ??= b;
         thumbnailPath ??= t;
+        screenshotPath ??= s;
       }, uri: uri);
     }
 
@@ -534,22 +545,24 @@ class LV2PluginCache {
       label: label,
       brand: brand,
       thumbnailPath: thumbnailPath,
+      screenshotPath: screenshotPath,
       controlPorts: controlPorts,
       fileParameters: fileParameters,
     );
   }
 
-  /// Extract modgui data (label, brand, thumbnail) from a pre-parsed graph.
+  /// Extract modgui data (label, brand, thumbnail, screenshot) from a pre-parsed graph.
   /// If uri is provided, only extract data for that specific plugin URI.
   static void _extractModguiDataFromGraph(
     Graph g,
     String bundlePath,
-    void Function(String? label, String? brand, String? thumbnailPath) onData,
+    void Function(String? label, String? brand, String? thumbnailPath, String? screenshotPath) onData,
     {String? uri}
   ) {
     String? label;
     String? brand;
     String? thumbnailPath;
+    String? screenshotPath;
 
     if (uri != null) {
       // Find the gui blank node for this specific plugin URI
@@ -580,6 +593,13 @@ class LV2PluginCache {
         if (thumbTriples.isNotEmpty) {
           thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
         }
+
+        final screenTriples = g.triples.where((t) =>
+            t.sub == guiNode &&
+            t.pre.value == 'http://moddevices.com/ns/modgui#screenshot');
+        if (screenTriples.isNotEmpty) {
+          screenshotPath = '$bundlePath/${screenTriples.first.obj.value}';
+        }
       }
     } else {
       // No specific URI - extract from any modgui properties
@@ -600,9 +620,15 @@ class LV2PluginCache {
       if (thumbTriples.isNotEmpty) {
         thumbnailPath = '$bundlePath/${thumbTriples.first.obj.value}';
       }
+
+      final screenTriples = g.triples.where((t) =>
+          t.pre.value == 'http://moddevices.com/ns/modgui#screenshot');
+      if (screenTriples.isNotEmpty) {
+        screenshotPath = '$bundlePath/${screenTriples.first.obj.value}';
+      }
     }
 
-    onData(label, brand, thumbnailPath);
+    onData(label, brand, thumbnailPath, screenshotPath);
   }
 
   /// Extract control ports from a pre-parsed plugin graph
