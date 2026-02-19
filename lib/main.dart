@@ -112,9 +112,33 @@ class _PiEdeUIState extends State<PiEdeUI> {
   int _currentBankId = 1;
   String _currentBankName = 'All Pedalboards';
 
+  // Active pedalboard index from HMI events
+  int _activePedalboardIndex = 0;
+
   @override
   void initState() {
     super.initState();
+    _subscribeToHmiEvents();
+  }
+
+  void _subscribeToHmiEvents() {
+    hmiServer.onPedalboardChange.listen((event) {
+      log.info("Main: pedalboard change event: index=${event.index}");
+      setState(() {
+        _activePedalboardIndex = event.index;
+        _selectedWidget = 0;
+        _title = 'Pedalboards';
+      });
+    });
+
+    hmiServer.onPedalboardLoad.listen((event) {
+      log.info("Main: pedalboard load event: index=${event.index}, uri=${event.uri}");
+      setState(() {
+        _activePedalboardIndex = event.index;
+        _selectedWidget = 0;
+        _title = 'Pedalboards';
+      });
+    });
   }
 
   void _onBankSelected(Bank bank) {
@@ -230,7 +254,7 @@ class _PiEdeUIState extends State<PiEdeUI> {
   Widget _buildBody() {
     switch (_selectedWidget) {
       case 0:
-        return PedalboardsWidget(hmiServer: hmiServer, bankId: _currentBankId);
+        return PedalboardsWidget(hmiServer: hmiServer, bankId: _currentBankId, activePedalboardIndex: _activePedalboardIndex);
       case 1:
         return BanksWidget(
           selectedBankId: _currentBankId,

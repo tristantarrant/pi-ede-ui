@@ -13,8 +13,9 @@ final log = Logger('Pedalboards');
 class PedalboardsWidget extends StatefulWidget {
   final HMIServer? hmiServer;
   final int bankId;
+  final int activePedalboardIndex;
 
-  const PedalboardsWidget({super.key, this.hmiServer, this.bankId = 1});
+  const PedalboardsWidget({super.key, this.hmiServer, this.bankId = 1, this.activePedalboardIndex = 0});
 
   @override
   State<PedalboardsWidget> createState() => _PedalboardsWidgetState();
@@ -27,7 +28,6 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   List<Pedal>? _pedals;
   bool _loadingPedals = false;
   Pedal? _selectedPedal;
-  StreamSubscription<PedalboardChangeEvent>? _changeSubscription;
   StreamSubscription<PedalboardLoadEvent>? _loadSubscription;
   StreamSubscription<FileParamEvent>? _fileParamSubscription;
   PageController? _pageController;
@@ -60,25 +60,6 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   void _subscribeToHmiEvents() {
     final hmi = widget.hmiServer;
     if (hmi == null) return;
-
-    _changeSubscription = hmi.onPedalboardChange.listen((event) {
-      log.info("HMI pedalboard change event: index=${event.index}");
-      if (event.index >= 0 && event.index < pedalboards.length) {
-        setState(() {
-          activePedalboard = event.index;
-          _editMode = false;
-          _pedals = null;
-          _selectedPedal = null;
-        });
-        _pageController?.animateToPage(
-          event.index,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-      } else {
-        log.warning("Invalid pedalboard index: ${event.index}");
-      }
-    });
 
     _loadSubscription = hmi.onPedalboardLoad.listen((event) {
       log.info("HMI pedalboard load event: index=${event.index}, uri=${event.uri}");
@@ -164,8 +145,28 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
   }
 
   @override
+  void didUpdateWidget(PedalboardsWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.activePedalboardIndex != oldWidget.activePedalboardIndex) {
+      final targetIndex = widget.activePedalboardIndex;
+      if (targetIndex >= 0 && targetIndex < pedalboards.length && targetIndex != activePedalboard) {
+        setState(() {
+          activePedalboard = targetIndex;
+          _editMode = false;
+          _pedals = null;
+          _selectedPedal = null;
+        });
+        _pageController?.animateToPage(
+          targetIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    }
+  }
+
+  @override
   void dispose() {
-    _changeSubscription?.cancel();
     _loadSubscription?.cancel();
     _fileParamSubscription?.cancel();
     _pageController?.dispose();
@@ -183,10 +184,11 @@ class _PedalboardsWidgetState extends State<PedalboardsWidget> {
     for (var pDir in pDirs) {
       pedalboards.add(Pedalboard.load(pDir));
     }
+    final initialPage = widget.activePedalboardIndex.clamp(0, pedalboards.length - 1);
     _pageController?.dispose();
-    _pageController = PageController(initialPage: 0);
+    _pageController = PageController(initialPage: initialPage);
     setState(() {
-      activePedalboard = 0;
+      activePedalboard = initialPage;
     });
     return pedalboards;
   }
